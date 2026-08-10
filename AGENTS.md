@@ -5,17 +5,15 @@
 - Read and understand the existing architecture before modifying code.
 - Modify only files required for the task.
 - Preserve existing functionality unless explicitly requested otherwise.
-- Avoid unnecessary architectural refactoring.
-- Keep new files and code additions to the minimum reasonably required.
-- Prefer extending an existing file when the responsibility already belongs there.
+- Avoid unnecessary architectural refactoring and unnecessary new files.
 - Maintain compatibility with the project's supported macOS version.
-- Build and test locally after meaningful changes.
+- After meaningful changes, ensure the project builds successfully.
 
 ## Git
 
 - Do not commit, push, tag, publish, or create releases without explicit user authorization.
 - Do not discard or overwrite existing user changes.
-- Before release-related work, verify the current Git state and HEAD.
+- Generated build products must remain excluded from Git.
 
 ## Build Metadata
 
@@ -23,31 +21,44 @@ Use the Git commit count as the numeric build number:
 
     CFBundleVersion = git rev-list --count HEAD
 
-Do not manually assign or edit the build number.
+Do not manually assign or edit `CFBundleVersion`.
 
-Debug builds should retain enough metadata to identify the exact source state:
+Debug builds must include:
 
 - Marketing version
 - Build number
-- Git commit hash
+- Short Git commit hash
 - Working-tree status (`clean` / `dirty`)
-- Build timestamp
+- Build timestamp (`yyyyMMdd.HHmmss`)
 
-Release builds should present clean public version information and omit debug-only metadata.
+## Debug Build Output
+
+Every successful local Debug build must also archive the runnable `.app` into:
+
+    Build/Debug-<BuildNumber>-<GitHash>-<Timestamp>/
+
+Example:
+
+    Build/Debug-31-213a61a-20260726.002044/
+
+Rules:
+
+- `BuildNumber` = `git rev-list --count HEAD`
+- `GitHash` = short Git HEAD hash
+- Never overwrite an earlier archived Debug build.
+- The archive must contain the runnable `.app` built from that exact source state.
+- `Build/` must remain ignored by Git.
 
 ## About Window
 
-If a custom About window is implemented:
+Before creating or modifying the About window, read and follow:
 
-- Prefer a native custom `NSWindow` rather than the standard system About panel when custom content is required.
-- Keep the controller strongly retained.
-- Ensure closing and reopening the window works reliably.
-- Avoid scrollable containers; all required content should be visible at once.
-- Keep icon, application name, version information, and credits clearly aligned and readable.
-- Do not hide or remove required attribution or license information.
-- Verify the actual About window at runtime; a successful build alone is not sufficient.
+    ABOUT_WINDOW_REQUIREMENTS.md
 
 ## Verification
 
-- Test only the build configuration relevant to the requested task unless broader verification is explicitly required.
-- Do not claim a configuration or behavior was verified unless it was actually built and tested.
+- Codex should perform build-time and code-level verification.
+- Manual UI and visual verification is normally performed by the user.
+- Do not spend time launching and visually inspecting the app unless explicitly requested.
+- Treat user-reported UI/runtime behavior as the authoritative verification result.
+- Never claim runtime behavior was verified unless it was actually tested.
