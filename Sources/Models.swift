@@ -42,7 +42,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     }
 }
 
-struct DefaultAppCategory: Identifiable, Hashable {
+struct DefaultAppCategory: Identifiable, Hashable, Codable {
     let id: String
     let title: String
     let subtitle: String
@@ -50,6 +50,7 @@ struct DefaultAppCategory: Identifiable, Hashable {
     let coreExtensions: [String]
     let optionalExtensions: [String]
     let urlSchemes: [String]
+    var isCustom = false
 
     var hasOptionalExtensions: Bool { !optionalExtensions.isEmpty }
     func extensions(includingOptional: Bool) -> [String] {

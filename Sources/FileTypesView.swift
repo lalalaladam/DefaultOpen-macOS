@@ -19,11 +19,9 @@ struct FileTypesView: View {
             let app = store.defaultApplication(for: type)
             return FileTypeRow(type: type, defaultApplication: app)
         }.sorted { lhs, rhs in
-            if sortColumn == .defaultAppName {
-                let lhsIsUnset = lhs.defaultApplication == nil
-                let rhsIsUnset = rhs.defaultApplication == nil
-                if lhsIsUnset != rhsIsUnset { return !lhsIsUnset }
-            }
+            let lhsIsUnset = lhs.defaultApplication == nil
+            let rhsIsUnset = rhs.defaultApplication == nil
+            if lhsIsUnset != rhsIsUnset { return !lhsIsUnset }
             let comparison: ComparisonResult
             switch sortColumn {
             case .extensionName:

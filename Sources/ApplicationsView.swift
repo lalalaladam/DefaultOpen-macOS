@@ -88,14 +88,34 @@ private struct ApplicationDetailView: View {
     @EnvironmentObject private var store: AssociationStore
     let application: ApplicationInfo
     @State private var selected = Set<SupportedType.ID>()
-    @State private var sortOrder = [KeyPathComparator<SupportedTypeRow>(\.extensionText)]
+    @State private var sortColumn: SupportedTypeSortColumn = .extensionName
+    @State private var sortAscending = true
+    @State private var pendingDefaultChange: PendingDefaultChange?
 
     private var rows: [SupportedTypeRow] {
         application.supportedTypes.map { type in
             let current = currentDefault(for: type)
             return SupportedTypeRow(type: type, currentDefault: current,
                                     isApplicationDefault: current?.bundleIdentifier == application.bundleIdentifier)
-        }.sorted(using: sortOrder)
+        }.sorted { lhs, rhs in
+            let lhsIsUnset = lhs.currentDefault == nil
+            let rhsIsUnset = rhs.currentDefault == nil
+            if lhsIsUnset != rhsIsUnset { return !lhsIsUnset }
+
+            let comparison: ComparisonResult
+            switch sortColumn {
+            case .extensionName:
+                comparison = lhs.extensionText.localizedStandardCompare(rhs.extensionText)
+            case .typeName:
+                comparison = lhs.typeSortText.localizedStandardCompare(rhs.typeSortText)
+            case .defaultAppName:
+                comparison = lhs.defaultAppName.localizedStandardCompare(rhs.defaultAppName)
+            }
+            if comparison == .orderedSame {
+                return lhs.extensionText.localizedStandardCompare(rhs.extensionText) == .orderedAscending
+            }
+            return sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
+        }
     }
 
     var body: some View {
@@ -115,6 +135,15 @@ private struct ApplicationDetailView: View {
             Divider().opacity(0.45)
             supportedTypesList
         }
+        .confirmationDialog(confirmationTitle, isPresented: Binding(
+            get: { pendingDefaultChange != nil },
+            set: { if !$0 { pendingDefaultChange = nil } }
+        ), titleVisibility: .visible) {
+            Button("继续设置") { applyPendingDefaultChange() }
+            Button("取消", role: .cancel) { pendingDefaultChange = nil }
+        } message: {
+            Text(confirmationMessage)
+        }
     }
 
     private var supportedTypesList: some View {
@@ -126,9 +155,12 @@ private struct ApplicationDetailView: View {
 
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    Text("扩展名").frame(width: extensionWidth, alignment: .leading)
-                    Text("文件类型 / UTType").frame(width: typeWidth, alignment: .leading)
-                    Text("当前默认 App").frame(width: defaultAppWidth, alignment: .leading)
+                    sortableHeader("扩展名", column: .extensionName)
+                        .frame(width: extensionWidth, alignment: .leading)
+                    sortableHeader("文件类型 / UTType", column: .typeName)
+                        .frame(width: typeWidth, alignment: .leading)
+                    sortableHeader("当前默认 App", column: .defaultAppName)
+                        .frame(width: defaultAppWidth, alignment: .leading)
                     Color.clear.frame(width: actionWidth)
                 }
                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -195,7 +227,7 @@ private struct ApplicationDetailView: View {
             store.errorMessage = "此 UTType 没有声明可用于设置关联的文件扩展名。"
             return
         }
-        Task { await store.setDefault(application, for: types) }
+        pendingDefaultChange = PendingDefaultChange(types: types, supportedTypeCount: 1)
     }
 
     private func makeSelectedDefault() {
@@ -206,8 +238,54 @@ private struct ApplicationDetailView: View {
             store.errorMessage = "所选类型没有可用于设置关联的文件扩展名。"
             return
         }
-        Task { await store.setDefault(application, for: unique) }
+        pendingDefaultChange = PendingDefaultChange(types: unique, supportedTypeCount: selected.count)
     }
+
+    private var confirmationTitle: String {
+        guard let change = pendingDefaultChange else { return "确认设为默认？" }
+        return change.supportedTypeCount == 1 ? "确认设为默认？" : "确认批量设为默认？"
+    }
+
+    private var confirmationMessage: String {
+        guard let change = pendingDefaultChange else { return "" }
+        let targets = change.types.map(\.dottedExtension).joined(separator: "、")
+        return "将使用 \(application.name) 默认打开 \(targets)。继续后，macOS 还可能要求系统确认。"
+    }
+
+    private func applyPendingDefaultChange() {
+        guard let change = pendingDefaultChange else { return }
+        pendingDefaultChange = nil
+        Task { await store.setDefault(application, for: change.types) }
+    }
+
+    private func sortableHeader(_ title: String, column: SupportedTypeSortColumn) -> some View {
+        Button {
+            if sortColumn == column {
+                sortAscending.toggle()
+            } else {
+                sortColumn = column
+                sortAscending = true
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(title)
+                if sortColumn == column {
+                    Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.bold))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private enum SupportedTypeSortColumn {
+    case extensionName, typeName, defaultAppName
+}
+
+private struct PendingDefaultChange {
+    let types: [FileTypeInfo]
+    let supportedTypeCount: Int
 }
 
 private struct SupportedTypeRow: Identifiable {
@@ -217,5 +295,6 @@ private struct SupportedTypeRow: Identifiable {
     var id: String { type.id }
     var extensionText: String { type.extensions.isEmpty ? "—" : type.extensions.map { "." + $0 }.joined(separator: ", ") }
     var displayName: String { type.displayName }
+    var typeSortText: String { "\(type.displayName) \(type.contentTypeIdentifier)" }
     var defaultAppName: String { currentDefault?.name ?? "" }
 }

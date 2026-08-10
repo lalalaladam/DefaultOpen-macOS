@@ -13,19 +13,75 @@ final class AssociationStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var successMessage: String?
     @Published private(set) var defaultsByContentType: [String: ApplicationInfo] = [:]
+    @Published private(set) var customDefaultAppCategories: [DefaultAppCategory] = []
 
     private let launchServices = LaunchServicesClient()
     private let scanner = AppScanner()
     private let savedKey = "managedExtensions"
+    private let customDefaultAppCategoriesKey = "customDefaultAppCategories"
     private let starterExtensions = ["pdf", "txt", "md", "jpg", "png", "heic", "svg", "zip", "json", "csv", "docx", "xlsx", "pptx", "html", "mp3", "mp4"]
     private var optimisticDefaultAppStatuses: [String: DefaultAppCategoryStatus] = [:]
 
     init() {
+        customDefaultAppCategories = Self.loadCustomDefaultAppCategories()
         let saved = customExtensionNames
         fileTypes = (starterExtensions + saved).uniqued().compactMap { try? launchServices.fileType(for: $0) }
             .sorted { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
         allFileTypes = fileTypes
         refreshDefaults(for: fileTypes)
+    }
+
+    func saveCustomDefaultAppCategory(id: String?, title: String, subtitle: String,
+                                      symbol: String, extensions: [String]) -> Bool {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSubtitle = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedExtensions = extensions.map {
+            $0.trimmingCharacters(in: CharacterSet(charactersIn: " .")).lowercased()
+        }.filter { !$0.isEmpty }.uniqued()
+
+        guard !normalizedTitle.isEmpty else {
+            errorMessage = "请输入组合名称。"
+            return false
+        }
+        guard !normalizedExtensions.isEmpty else {
+            errorMessage = "请至少添加一个文件扩展名。"
+            return false
+        }
+        let invalidExtensions = normalizedExtensions.filter {
+            (try? launchServices.fileType(for: $0)) == nil
+        }
+        guard invalidExtensions.isEmpty else {
+            errorMessage = "无法识别扩展名：\(invalidExtensions.joined(separator: "、"))"
+            return false
+        }
+
+        let category = DefaultAppCategory(
+            id: id ?? "custom.\(UUID().uuidString.lowercased())",
+            title: normalizedTitle,
+            subtitle: normalizedSubtitle.isEmpty ? normalizedExtensions.map { "." + $0 }.joined(separator: "、") : normalizedSubtitle,
+            symbol: symbol,
+            coreExtensions: normalizedExtensions,
+            optionalExtensions: [],
+            urlSchemes: [],
+            isCustom: true
+        )
+        if let index = customDefaultAppCategories.firstIndex(where: { $0.id == category.id }) {
+            customDefaultAppCategories[index] = category
+        } else {
+            customDefaultAppCategories.append(category)
+        }
+        persistCustomDefaultAppCategories()
+        optimisticDefaultAppStatuses.removeValue(forKey: category.id)
+        defaultAppRevision += 1
+        return true
+    }
+
+    func removeCustomDefaultAppCategory(_ category: DefaultAppCategory) {
+        guard category.isCustom else { return }
+        customDefaultAppCategories.removeAll { $0.id == category.id }
+        optimisticDefaultAppStatuses.removeValue(forKey: category.id)
+        persistCustomDefaultAppCategories()
+        defaultAppRevision += 1
     }
 
     func scanApplications() async {
@@ -396,6 +452,19 @@ final class AssociationStore: ObservableObject {
 
     private func persistCustomExtensions(_ extensions: [String]) {
         UserDefaults.standard.set(extensions, forKey: savedKey)
+    }
+
+    private static func loadCustomDefaultAppCategories() -> [DefaultAppCategory] {
+        guard let data = UserDefaults.standard.data(forKey: "customDefaultAppCategories"),
+              let categories = try? JSONDecoder().decode([DefaultAppCategory].self, from: data) else {
+            return []
+        }
+        return categories.filter(\.isCustom)
+    }
+
+    private func persistCustomDefaultAppCategories() {
+        guard let data = try? JSONEncoder().encode(customDefaultAppCategories) else { return }
+        UserDefaults.standard.set(data, forKey: customDefaultAppCategoriesKey)
     }
 
     private func mergeIntoFileTypeCatalog(_ types: [FileTypeInfo]) {

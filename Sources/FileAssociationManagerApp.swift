@@ -190,12 +190,22 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
             if remainingPasses > 1 {
                 self.prepareInitialReveal(of: window, remainingPasses: remainingPasses - 1)
             } else {
+                self.lowerWindowControls(in: window)
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.15
                     context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                     window.animator().alphaValue = 1
                 }
             }
+        }
+    }
+
+    private func lowerWindowControls(in window: NSWindow) {
+        for buttonType in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            guard let button = window.standardWindowButton(buttonType) else { continue }
+            var frame = button.frame
+            frame.origin.y -= 7
+            button.setFrameOrigin(frame.origin)
         }
     }
 
