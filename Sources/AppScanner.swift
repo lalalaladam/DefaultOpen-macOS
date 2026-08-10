@@ -22,7 +22,7 @@ struct AppScanner: Sendable {
 
         for root in roots where FileManager.default.fileExists(atPath: root.path) {
             for url in applicationURLs(in: root, maximumDepth: 2) {
-                if let app = applicationInfo(at: url) { apps[app.bundleIdentifier] = app }
+                if let app = try? applicationInfo(at: url) { apps[app.bundleIdentifier] = app }
             }
         }
         return Array(apps.values)
@@ -94,14 +94,30 @@ struct AppScanner: Sendable {
         }
     }
 
-    private func applicationInfo(at url: URL) -> ApplicationInfo? {
-        guard let bundle = Bundle(url: url), let bundleID = bundle.bundleIdentifier else { return nil }
+    func applicationInfo(at url: URL) throws -> ApplicationInfo {
+        guard url.pathExtension.lowercased() == "app", let bundle = Bundle(url: url) else {
+            throw AssociationError.invalidApplication(url)
+        }
+        guard let bundleID = bundle.bundleIdentifier else {
+            throw AssociationError.missingBundleIdentifier(url)
+        }
+        guard let executableURL = bundle.executableURL,
+              FileManager.default.isExecutableFile(atPath: executableURL.path) else {
+            throw AssociationError.missingApplicationExecutable(url)
+        }
         let info = bundle.infoDictionary ?? [:]
         let name = (info["CFBundleDisplayName"] as? String)
             ?? (info["CFBundleName"] as? String)
             ?? url.deletingPathExtension().lastPathComponent
         let types = parseDocumentTypes(info: info)
         return ApplicationInfo(bundleIdentifier: bundleID, name: name, url: url, supportedTypes: types)
+    }
+
+    func supportedURLSchemes(at url: URL) -> Set<String> {
+        guard let info = Bundle(url: url)?.infoDictionary else { return [] }
+        let urlTypes = info["CFBundleURLTypes"] as? [[String: Any]] ?? []
+        return Set(urlTypes.flatMap { stringArray($0["CFBundleURLSchemes"]) }
+            .map { $0.lowercased() })
     }
 
     private func parseDocumentTypes(info: [String: Any]) -> [SupportedType] {

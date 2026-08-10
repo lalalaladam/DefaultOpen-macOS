@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 @MainActor
 final class AssociationStore: ObservableObject {
@@ -92,6 +93,44 @@ final class AssociationStore: ObservableObject {
         launchServices.capableApplications(for: type)
     }
 
+    func validatedApplication(at url: URL, for type: FileTypeInfo) throws -> ApplicationInfo {
+        let application = try scanner.applicationInfo(at: url)
+        guard applicationSupports(application, fileType: type) else {
+            throw AssociationError.incompatibleApplication(application.name, [type.dottedExtension])
+        }
+        return application
+    }
+
+    func validatedDefaultAppCandidate(at url: URL, for category: DefaultAppCategory,
+                                      includingOptional: Bool) throws -> DefaultAppCandidate {
+        let application = try scanner.applicationInfo(at: url)
+        let coreTargets = defaultAppTargets(for: category, includingOptional: false,
+                                            includeCapabilities: false)
+        let targets = defaultAppTargets(for: category, includingOptional: includingOptional,
+                                        includeCapabilities: false)
+        let unsupportedCore = coreTargets.filter { !applicationSupports(application, target: $0) }
+        guard unsupportedCore.isEmpty else {
+            throw AssociationError.incompatibleApplication(application.name, unsupportedCore.map(\.label))
+        }
+
+        let supported = targets.filter { applicationSupports(application, target: $0) }
+        let unsupported = targets.filter { !applicationSupports(application, target: $0) }
+        let currentTargets = targets.filter {
+            $0.defaultApplication?.bundleIdentifier == application.bundleIdentifier
+        }.map(\.label)
+        return DefaultAppCandidate(
+            application: application,
+            supportedCount: supported.count,
+            totalCount: targets.count,
+            supportedTargets: supported.map(\.label),
+            unsupportedTargets: unsupported.map(\.label),
+            currentTargets: currentTargets,
+            isCurrentDefault: coreTargets.allSatisfy {
+                $0.defaultApplication?.bundleIdentifier == application.bundleIdentifier
+            }
+        )
+    }
+
     func defaultAppStatus(for category: DefaultAppCategory) -> DefaultAppCategoryStatus {
         _ = defaultAppRevision
         if let optimistic = optimisticDefaultAppStatuses[category.id] { return optimistic }
@@ -158,6 +197,17 @@ final class AssociationStore: ObservableObject {
                     includingOptional: Bool,
                     progress: (Int, Int, String) -> Void) async -> DefaultAppChangeResult? {
         do {
+            let unsupportedCore = defaultAppTargets(for: category, includingOptional: false,
+                                                    includeCapabilities: false)
+                .filter { !applicationSupports(application, target: $0) }
+            guard unsupportedCore.isEmpty else {
+                errorMessage = AssociationError.incompatibleApplication(
+                    application.name,
+                    unsupportedCore.map(\.label)
+                ).localizedDescription
+                return nil
+            }
+
             var changedTargets: [String] = []
             var skippedTargets: [String] = []
             var unchangedTargets: [String] = []
@@ -170,8 +220,7 @@ final class AssociationStore: ObservableObject {
                     unchangedTargets.append(label)
                     continue
                 }
-                let capableIDs = Set(launchServices.capableApplications(forURLScheme: scheme).map(\.bundleIdentifier))
-                guard capableIDs.contains(application.bundleIdentifier) else {
+                guard applicationSupports(application, urlScheme: scheme) else {
                     skippedTargets.append(label)
                     continue
                 }
@@ -183,9 +232,7 @@ final class AssociationStore: ObservableObject {
                     unchangedTargets.append(type.dottedExtension)
                     continue
                 }
-                let isCapable = launchServices.capableBundleIdentifiers(forContentType: type.contentTypeIdentifier)
-                    .contains(application.bundleIdentifier)
-                guard isCapable else {
+                guard applicationSupports(application, fileType: type) else {
                     skippedTargets.append(type.dottedExtension)
                     continue
                 }
@@ -238,6 +285,16 @@ final class AssociationStore: ObservableObject {
         do {
             let uniqueTypes = Dictionary(grouping: types, by: \FileTypeInfo.contentTypeIdentifier)
                 .compactMap(\.value.first)
+            let unsupportedTypes = uniqueTypes.filter {
+                !applicationSupports(application, fileType: $0)
+            }
+            guard unsupportedTypes.isEmpty else {
+                errorMessage = AssociationError.incompatibleApplication(
+                    application.name,
+                    unsupportedTypes.map(\.dottedExtension)
+                ).localizedDescription
+                return false
+            }
             let typesToChange = uniqueTypes.filter {
                 launchServices.defaultApplication(for: $0)?.bundleIdentifier != application.bundleIdentifier
             }
@@ -285,7 +342,7 @@ final class AssociationStore: ObservableObject {
 
     func matchingFileTypes(for searchText: String, includeAll: Bool) -> [FileTypeInfo] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = includeAll || !query.isEmpty ? allFileTypes : fileTypes
+        let source = includeAll ? allFileTypes : fileTypes
         guard !query.isEmpty else { return source }
 
         let extensionQuery = query.trimmingCharacters(in: CharacterSet(charactersIn: "."))
@@ -323,6 +380,7 @@ final class AssociationStore: ObservableObject {
                                    includeCapabilities: Bool = true) -> [DefaultAppTarget] {
         var targets = category.urlSchemes.map { scheme in
             DefaultAppTarget(key: "scheme:\(scheme)", label: scheme.uppercased(),
+                             kind: .urlScheme(scheme),
                              defaultApplication: launchServices.defaultApplication(forURLScheme: scheme),
                              capableApplications: includeCapabilities
                                 ? launchServices.capableApplications(forURLScheme: scheme) : [])
@@ -345,11 +403,42 @@ final class AssociationStore: ObservableObject {
             guard let type = typeByIdentifier[identifier] else { return nil }
             return DefaultAppTarget(key: "type:\(identifier)",
                                     label: labelsByIdentifier[identifier, default: []].joined(separator: "/"),
+                                    kind: .fileType(type),
                                     defaultApplication: launchServices.defaultApplication(for: type),
                                     capableApplications: includeCapabilities
                                         ? launchServices.capableApplications(for: type) : [])
         }
         return targets
+    }
+
+    private func applicationSupports(_ application: ApplicationInfo, target: DefaultAppTarget) -> Bool {
+        switch target.kind {
+        case .urlScheme(let scheme):
+            applicationSupports(application, urlScheme: scheme)
+        case .fileType(let type):
+            applicationSupports(application, fileType: type)
+        }
+    }
+
+    private func applicationSupports(_ application: ApplicationInfo, urlScheme: String) -> Bool {
+        if launchServices.capableApplications(forURLScheme: urlScheme)
+            .contains(where: { $0.bundleIdentifier == application.bundleIdentifier }) {
+            return true
+        }
+        return scanner.supportedURLSchemes(at: application.url).contains(urlScheme.lowercased())
+    }
+
+    private func applicationSupports(_ application: ApplicationInfo, fileType: FileTypeInfo) -> Bool {
+        if launchServices.capableBundleIdentifiers(forContentType: fileType.contentTypeIdentifier)
+            .contains(application.bundleIdentifier) {
+            return true
+        }
+        guard let requestedType = UTType(fileType.contentTypeIdentifier) else { return false }
+        return application.supportedTypes.contains { supported in
+            if supported.extensions.contains(fileType.extensionName.lowercased()) { return true }
+            guard let declaredType = UTType(supported.contentTypeIdentifier) else { return false }
+            return requestedType == declaredType || requestedType.conforms(to: declaredType)
+        }
     }
 
     private func verifyDefaultAppStatus(_ application: ApplicationInfo,
@@ -380,8 +469,14 @@ final class AssociationStore: ObservableObject {
 private struct DefaultAppTarget {
     let key: String
     let label: String
+    let kind: DefaultAppTargetKind
     let defaultApplication: ApplicationInfo?
     let capableApplications: [ApplicationInfo]
+}
+
+private enum DefaultAppTargetKind {
+    case urlScheme(String)
+    case fileType(FileTypeInfo)
 }
 
 private enum DefaultChangeOperation {

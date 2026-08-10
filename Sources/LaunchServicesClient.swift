@@ -5,13 +5,20 @@ import UniformTypeIdentifiers
 
 enum AssociationError: LocalizedError {
     case invalidExtension(String)
+    case invalidApplication(URL)
     case missingBundleIdentifier(URL)
+    case missingApplicationExecutable(URL)
+    case incompatibleApplication(String, [String])
     case launchServices(OSStatus)
 
     var errorDescription: String? {
         switch self {
         case .invalidExtension(let value): "无法识别文件扩展名：\(value)"
+        case .invalidApplication(let url): "所选项目不是有效的 App：\(url.lastPathComponent)"
         case .missingBundleIdentifier(let url): "应用缺少 Bundle Identifier：\(url.lastPathComponent)"
+        case .missingApplicationExecutable(let url): "应用缺少可执行文件：\(url.lastPathComponent)"
+        case .incompatibleApplication(let name, let targets):
+            "\(name) 没有声明支持：\(targets.joined(separator: "、"))"
         case .launchServices(let status): "Launch Services 修改失败（OSStatus \(status)）"
         }
     }

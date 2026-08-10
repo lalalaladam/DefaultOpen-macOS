@@ -1,10 +1,8 @@
-import AppKit
 import SwiftUI
 
 struct FileTypesView: View {
     @EnvironmentObject private var store: AssociationStore
     @State private var searchText = ""
-    @State private var selection = Set<FileTypeInfo.ID>()
     @State private var presentedType: FileTypeInfo?
     @State private var addingExtension = false
     @State private var newExtension = ""
@@ -26,7 +24,7 @@ struct FileTypesView: View {
             fileTypeList
         }
         .sheet(item: $presentedType) { type in
-            ApplicationPickerSheet(type: type, batchTypes: selectedTypes(including: type))
+            ApplicationPickerSheet(type: type)
                 .environmentObject(store)
         }
         .alert("添加文件扩展名", isPresented: $addingExtension) {
@@ -42,8 +40,10 @@ struct FileTypesView: View {
         GeometryReader { proxy in
             let extensionWidth: CGFloat = 96
             let defaultAppWidth = min(220, max(160, proxy.size.width * 0.24))
-            let actionWidth: CGFloat = 62
-            let typeWidth = max(180, proxy.size.width - extensionWidth - defaultAppWidth - actionWidth - 72)
+            let actionWidth: CGFloat = 78
+            // Keep a stable gutter for the vertical scroller so its first appearance
+            // cannot force the trailing columns to move.
+            let typeWidth = max(180, proxy.size.width - extensionWidth - defaultAppWidth - actionWidth - 88)
 
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
@@ -73,29 +73,17 @@ struct FileTypesView: View {
                                 DefaultAppLabel(application: row.defaultApplication)
                                     .frame(width: defaultAppWidth, alignment: .leading)
                                 Button("更改…") { presentedType = row.type }
-                                    .buttonStyle(.borderless).frame(width: actionWidth)
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .frame(width: actionWidth)
                             }
                             .padding(.horizontal, 12).frame(height: 52)
-                            .background(selection.contains(row.id) ? Color.accentColor.opacity(0.18) : Color.clear)
-                            .contentShape(Rectangle())
-                            .onTapGesture(count: 2) { presentedType = row.type }
-                            .onTapGesture { selectRow(row.id) }
-                            .contextMenu {
-                                Button("更改默认打开程序…") { presentedType = row.type }
-                            }
                             Divider().padding(.leading, 12)
                         }
                     }
                 }
+                .scrollIndicators(.visible)
             }
-        }
-    }
-
-    private func selectRow(_ id: FileTypeInfo.ID) {
-        if NSEvent.modifierFlags.contains(.command) {
-            if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
-        } else {
-            selection = [id]
         }
     }
 
@@ -103,28 +91,29 @@ struct FileTypesView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("文件类型").font(.title2.weight(.semibold))
-                Text("查看和批量更改文件的默认打开方式").font(.callout).foregroundStyle(.secondary)
+                Text("查看和更改文件的默认打开方式").font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            if selection.count > 1 { Text("已选择 \(selection.count) 项").foregroundStyle(.secondary) }
-            Button {
-                selection.removeAll()
-                if showsAllTypes {
-                    showsAllTypes = false
-                } else {
-                    showsAllTypes = true
+            Picker("显示范围", selection: $showsAllTypes) {
+                Text("常用类型").tag(false)
+                Text("全部类型").tag(true)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 180)
+            .onChange(of: showsAllTypes) { _, includeAll in
+                if includeAll {
                     Task { await store.loadAllFileTypes() }
                 }
-            } label: {
+            }
+            ZStack {
                 if store.isLoadingFileTypes {
-                    Label("正在载入类型…", systemImage: "list.bullet")
-                } else {
-                    Label(showsAllTypes ? "仅显示常用类型" : "显示全部类型",
-                          systemImage: showsAllTypes ? "line.3.horizontal.decrease.circle.fill" : "list.bullet")
+                    ProgressView()
+                        .controlSize(.small)
+                        .help("正在载入全部类型…")
                 }
             }
-            .buttonStyle(.bordered)
-            .disabled(store.isLoadingFileTypes)
+            .frame(width: 16, height: 16)
             SearchBox(prompt: "搜索扩展名或文件类型", text: $searchText)
             Button { addingExtension = true } label: { Label("添加扩展名", systemImage: "plus") }
                 .buttonStyle(.bordered)
@@ -132,10 +121,6 @@ struct FileTypesView: View {
         .padding(.horizontal, 22).padding(.vertical, 16)
     }
 
-    private func selectedTypes(including type: FileTypeInfo) -> [FileTypeInfo] {
-        let chosen = store.allFileTypes.filter { selection.contains($0.id) }
-        return chosen.count > 1 && selection.contains(type.id) ? chosen : [type]
-    }
 }
 
 private struct FileTypeRow: Identifiable {
@@ -161,20 +146,24 @@ private struct ApplicationPickerSheet: View {
     @EnvironmentObject private var store: AssociationStore
     @Environment(\.dismiss) private var dismiss
     let type: FileTypeInfo
-    let batchTypes: [FileTypeInfo]
     @State private var applications: [ApplicationInfo] = []
+    @State private var selectedApplicationID: ApplicationInfo.ID?
     @State private var isApplying = false
+    @State private var validationMessage: String?
+
+    private var selectedApplication: ApplicationInfo? {
+        applications.first { $0.id == selectedApplicationID }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(batchTypes.count > 1 ? "更改 \(batchTypes.count) 种文件的打开方式" : "\(type.dottedExtension) 的打开方式")
+                    Text("\(type.dottedExtension) 的打开方式")
                         .font(.title2.weight(.semibold))
-                    Text("选择后将应用于相应扩展名的所有文件").foregroundStyle(.secondary)
+                    Text("先选择一个 App，再确认设为默认").foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("完成") { dismiss() }.keyboardShortcut(.cancelAction)
             }.padding(20)
             Divider()
             if applications.isEmpty {
@@ -184,13 +173,13 @@ private struct ApplicationPickerSheet: View {
             } else {
                 List(applications) { app in
                     Button {
-                        isApplying = true
-                        Task { @MainActor in
-                            if await store.setDefault(app, for: batchTypes) { dismiss() }
-                            else { isApplying = false }
-                        }
+                        selectedApplicationID = app.id
                     } label: {
                         HStack(spacing: 12) {
+                            Image(systemName: selectedApplicationID == app.id
+                                  ? "largecircle.fill.circle" : "circle")
+                                .foregroundStyle(selectedApplicationID == app.id
+                                                 ? Color.accentColor : Color.secondary)
                             AppIcon(url: app.url, size: 38)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(app.name).foregroundStyle(.primary)
@@ -198,16 +187,87 @@ private struct ApplicationPickerSheet: View {
                             }
                             Spacer()
                             if store.defaultApplication(for: type)?.bundleIdentifier == app.bundleIdentifier {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
+                                Label("当前默认", systemImage: "checkmark.circle.fill")
+                                    .font(.callout.weight(.medium)).foregroundStyle(.green)
                             }
                         }.padding(.vertical, 3)
                     }.buttonStyle(.plain).disabled(isApplying)
                 }
                 .scrollContentBackground(.hidden)
             }
+            Divider()
+            VStack(alignment: .leading, spacing: 10) {
+                if let app = selectedApplication {
+                    Text("将 \(app.name) 设为 \(type.dottedExtension) 的默认 App")
+                        .font(.headline)
+                    Text("修改后，所有 \(type.dottedExtension) 文件将默认使用此 App 打开。")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    Text("请先选择一个 App。点击应用不会立即修改系统设置。")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button {
+                        chooseOtherApplication()
+                    } label: {
+                        Label("选择其他 App…", systemImage: "folder")
+                    }
+                    .disabled(isApplying)
+                    Spacer()
+                    Button("取消") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                        .disabled(isApplying)
+                    Button {
+                        applySelection()
+                    } label: {
+                        if isApplying {
+                            ProgressView().controlSize(.small)
+                            Text("正在设置…")
+                        } else {
+                            Text("设为默认")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(selectedApplication == nil || isApplying)
+                }
+            }
+            .padding(16)
         }
-        .frame(width: 520, height: 520)
+        .frame(width: 580, height: 620)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
         .onAppear { applications = store.capableApplications(for: type) }
+        .alert("无法使用所选 App", isPresented: Binding(
+            get: { validationMessage != nil },
+            set: { if !$0 { validationMessage = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(validationMessage ?? "")
+        }
+    }
+
+    private func chooseOtherApplication() {
+        guard let url = chooseApplicationURL() else { return }
+        do {
+            let application = try store.validatedApplication(at: url, for: type)
+            applications.removeAll { $0.bundleIdentifier == application.bundleIdentifier }
+            applications.append(application)
+            applications.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            selectedApplicationID = application.id
+        } catch {
+            validationMessage = error.localizedDescription
+        }
+    }
+
+    private func applySelection() {
+        guard let application = selectedApplication else { return }
+        isApplying = true
+        Task { @MainActor in
+            if await store.setDefault(application, for: [type]) {
+                dismiss()
+            } else {
+                isApplying = false
+            }
+        }
     }
 }

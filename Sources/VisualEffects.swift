@@ -1,5 +1,22 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+
+@MainActor
+func chooseApplicationURL() -> URL? {
+    let panel = NSOpenPanel()
+    panel.title = "选择 App"
+    panel.prompt = "选择"
+    panel.message = "请选择一个能够处理目标类型的 App。"
+    panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+    panel.allowedContentTypes = [.applicationBundle]
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.allowsMultipleSelection = false
+    panel.resolvesAliases = true
+    panel.treatsFilePackagesAsDirectories = false
+    return panel.runModal() == .OK ? panel.url : nil
+}
 
 struct VisualEffectView: NSViewRepresentable {
     var material: NSVisualEffectView.Material = .underWindowBackground
@@ -38,17 +55,45 @@ struct SearchBox: View {
     @Binding var text: String
 
     var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField(prompt, text: $text).textFieldStyle(.plain)
-            if !text.isEmpty {
-                Button { text = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
-                }.buttonStyle(.plain)
-            }
+        NativeSearchField(prompt: prompt, text: $text)
+            .frame(width: 220, height: 28)
+    }
+}
+
+private struct NativeSearchField: NSViewRepresentable {
+    let prompt: String
+    @Binding var text: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = prompt
+        field.delegate = context.coordinator
+        field.controlSize = .regular
+        field.focusRingType = .default
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        field.placeholderString = prompt
+        if field.stringValue != text {
+            field.stringValue = text
         }
-        .padding(.horizontal, 9).frame(width: 220, height: 28)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 7).stroke(.primary.opacity(0.08)) }
+    }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        @Binding private var text: String
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            text = field.stringValue
+        }
     }
 }

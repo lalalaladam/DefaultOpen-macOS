@@ -111,9 +111,11 @@ private struct DefaultAppPickerSheet: View {
     @State private var includesOptional = false
     @State private var candidates: [DefaultAppCandidate] = []
     @State private var selectedCandidateID: DefaultAppCandidate.ID?
+    @State private var customApplicationURL: URL?
     @State private var isApplying = false
     @State private var resultMessage: String?
     @State private var progressText: String?
+    @State private var validationMessage: String?
 
     private var selectedCandidate: DefaultAppCandidate? {
         candidates.first { $0.id == selectedCandidateID }
@@ -246,6 +248,12 @@ private struct DefaultAppPickerSheet: View {
                     Text(progressText).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 HStack {
+                    Button {
+                        chooseOtherApplication()
+                    } label: {
+                        Label("选择其他 App…", systemImage: "folder")
+                    }
+                    .disabled(isApplying)
                     Spacer()
                     Button("取消") { dismiss() }.keyboardShortcut(.cancelAction).disabled(isApplying)
                     Button {
@@ -267,6 +275,14 @@ private struct DefaultAppPickerSheet: View {
         .frame(width: 620, height: 680)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
         .onAppear { reloadCandidates() }
+        .alert("无法使用所选 App", isPresented: Binding(
+            get: { validationMessage != nil },
+            set: { if !$0 { validationMessage = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(validationMessage ?? "")
+        }
     }
 
     private var targetDescription: String {
@@ -280,9 +296,49 @@ private struct DefaultAppPickerSheet: View {
 
     private func reloadCandidates() {
         candidates = store.defaultAppCandidates(for: category, includingOptional: includesOptional)
+        if let customApplicationURL {
+            do {
+                let candidate = try store.validatedDefaultAppCandidate(
+                    at: customApplicationURL,
+                    for: category,
+                    includingOptional: includesOptional
+                )
+                insertCustomCandidate(candidate)
+            } catch {
+                self.customApplicationURL = nil
+            }
+        }
         if let selectedCandidateID,
            !candidates.contains(where: { $0.id == selectedCandidateID }) {
             self.selectedCandidateID = nil
+        }
+    }
+
+    private func chooseOtherApplication() {
+        guard let url = chooseApplicationURL() else { return }
+        do {
+            let candidate = try store.validatedDefaultAppCandidate(
+                at: url,
+                for: category,
+                includingOptional: includesOptional
+            )
+            customApplicationURL = url
+            insertCustomCandidate(candidate)
+            selectedCandidateID = candidate.id
+            resultMessage = nil
+        } catch {
+            validationMessage = error.localizedDescription
+        }
+    }
+
+    private func insertCustomCandidate(_ candidate: DefaultAppCandidate) {
+        candidates.removeAll { $0.id == candidate.id }
+        candidates.append(candidate)
+        candidates.sort {
+            if $0.supportedCount != $1.supportedCount {
+                return $0.supportedCount > $1.supportedCount
+            }
+            return $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending
         }
     }
 

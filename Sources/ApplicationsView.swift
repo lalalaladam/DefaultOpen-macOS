@@ -72,12 +72,14 @@ struct ApplicationsView: View {
                 Text("按名称或支持的文件类型筛选已安装的应用").font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            if store.isScanning { ProgressView().controlSize(.small) }
             SearchBox(prompt: "搜索应用或文件类型", text: $searchText)
                 .help("可按应用名称、Bundle Identifier、扩展名或文件类型筛选。")
             Button { Task { await store.scanApplications() } } label: {
-                Label("重新扫描", systemImage: "arrow.clockwise")
-            }.buttonStyle(.bordered).disabled(store.isScanning)
+                Label(store.isScanning ? "正在扫描…" : "重新扫描", systemImage: "arrow.clockwise")
+                    .frame(width: 96)
+            }
+            .buttonStyle(.bordered)
+            .disabled(store.isScanning)
         }.padding(.horizontal, 22).padding(.vertical, 16)
     }
 }

@@ -171,18 +171,32 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
         mainWindowController?.showWindow(nil)
         if needsInitialReveal {
             guard let window = mainWindowController?.window else { return }
-            DispatchQueue.main.async {
-                window.contentView?.needsLayout = true
-                window.contentView?.layoutSubtreeIfNeeded()
-                window.displayIfNeeded()
-                window.alphaValue = 1
-                window.makeKeyAndOrderFront(nil)
-                NSApp.activate(ignoringOtherApps: true)
-            }
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            prepareInitialReveal(of: window, remainingPasses: 2)
             return
         }
         mainWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func prepareInitialReveal(of window: NSWindow, remainingPasses: Int) {
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else { return }
+            window.contentView?.needsLayout = true
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+
+            if remainingPasses > 1 {
+                self.prepareInitialReveal(of: window, remainingPasses: remainingPasses - 1)
+            } else {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.15
+                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    window.animator().alphaValue = 1
+                }
+            }
+        }
     }
 
     @objc func showDefaultOpenCustomAbout(_ sender: Any?) {
