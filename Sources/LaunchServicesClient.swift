@@ -53,6 +53,29 @@ struct LaunchServicesClient: Sendable {
         return unmanaged.takeRetainedValue() as? [String] ?? []
     }
 
+    func defaultApplication(forURLScheme scheme: String) -> ApplicationInfo? {
+        guard let unmanaged = LSCopyDefaultHandlerForURLScheme(scheme as CFString),
+              let bundleID = unmanaged.takeRetainedValue() as String?,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        return lightweightApplication(bundleID: bundleID, url: url)
+    }
+
+    func capableApplications(forURLScheme scheme: String) -> [ApplicationInfo] {
+        guard let unmanaged = LSCopyAllHandlersForURLScheme(scheme as CFString),
+              let bundleIDs = unmanaged.takeRetainedValue() as? [String] else { return [] }
+        return bundleIDs.compactMap { bundleID in
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+                .map { lightweightApplication(bundleID: bundleID, url: $0) }
+        }
+        .uniqued(by: \ApplicationInfo.bundleIdentifier)
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func setDefault(_ application: ApplicationInfo, forURLScheme scheme: String) throws {
+        let status = LSSetDefaultHandlerForURLScheme(scheme as CFString, application.bundleIdentifier as CFString)
+        guard status == noErr else { throw AssociationError.launchServices(status) }
+    }
+
     func setDefault(_ application: ApplicationInfo, for type: FileTypeInfo) throws {
         let status = LSSetDefaultRoleHandlerForContentType(
             type.contentTypeIdentifier as CFString,
@@ -60,6 +83,25 @@ struct LaunchServicesClient: Sendable {
             application.bundleIdentifier as CFString
         )
         guard status == noErr else { throw AssociationError.launchServices(status) }
+    }
+
+    func setDefaultAwaitingConsent(_ application: ApplicationInfo,
+                                   forURLScheme scheme: String) async throws {
+        try await NSWorkspace.shared.setDefaultApplication(
+            at: application.url,
+            toOpenURLsWithScheme: scheme
+        )
+    }
+
+    func setDefaultAwaitingConsent(_ application: ApplicationInfo,
+                                   for type: FileTypeInfo) async throws {
+        guard let contentType = UTType(type.contentTypeIdentifier) else {
+            throw AssociationError.invalidExtension(type.extensionName)
+        }
+        try await NSWorkspace.shared.setDefaultApplication(
+            at: application.url,
+            toOpen: contentType
+        )
     }
 
     private func lightweightApplication(bundleID: String, url: URL) -> ApplicationInfo {

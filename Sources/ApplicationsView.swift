@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ApplicationsView: View {
@@ -47,16 +48,16 @@ struct ApplicationsView: View {
                         }.padding(.vertical, 3).tag(app.id)
                     }
                     .scrollContentBackground(.hidden)
-                    .frame(minWidth: 245, idealWidth: 285, maxWidth: 340)
+                    .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
                     .background(Color.clear)
 
                     if let app = store.applications.first(where: { $0.id == selectedAppID }) {
                         ApplicationDetailView(application: app)
-                            .frame(minWidth: 430, maxWidth: .infinity, maxHeight: .infinity)
+                            .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ContentUnavailableView("选择一个应用程序", systemImage: "app",
                                                description: Text("查看它支持的文件类型并修改默认关联。"))
-                            .frame(minWidth: 430, maxWidth: .infinity, maxHeight: .infinity)
+                            .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }
@@ -68,12 +69,12 @@ struct ApplicationsView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text("应用程序").font(.title2.weight(.semibold))
-                Text("搜索应用名称，或输入 .pdf 查看支持该格式的应用").font(.callout).foregroundStyle(.secondary)
+                Text("按名称或支持的文件类型筛选已安装的应用").font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
             if store.isScanning { ProgressView().controlSize(.small) }
-            SearchBox(prompt: "搜索应用或扩展名", text: $searchText)
-                .help("输入应用名称、Bundle Identifier，或 .pdf 这样的扩展名，筛选支持该格式的应用。")
+            SearchBox(prompt: "搜索应用或文件类型", text: $searchText)
+                .help("可按应用名称、Bundle Identifier、扩展名或文件类型筛选。")
             Button { Task { await store.scanApplications() } } label: {
                 Label("重新扫描", systemImage: "arrow.clockwise")
             }.buttonStyle(.bordered).disabled(store.isScanning)
@@ -110,34 +111,74 @@ private struct ApplicationDetailView: View {
                 }
             }.padding(20)
             Divider().opacity(0.45)
-            Table(rows, selection: $selected, sortOrder: $sortOrder) {
-                TableColumn("扩展名", value: \.extensionText) { row in
-                    Text(row.extensionText)
-                        .font(.system(.callout, design: .monospaced)).lineLimit(2)
-                }.width(min: 100, ideal: 160)
-                TableColumn("文件类型 / UTType", value: \.displayName) { row in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(row.type.displayName)
-                        Text(row.type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
-                    }
+            supportedTypesList
+        }
+    }
+
+    private var supportedTypesList: some View {
+        GeometryReader { proxy in
+            let extensionWidth = min(145, max(90, proxy.size.width * 0.18))
+            let defaultAppWidth = min(195, max(145, proxy.size.width * 0.24))
+            let actionWidth: CGFloat = 78
+            let typeWidth = max(160, proxy.size.width - extensionWidth - defaultAppWidth - actionWidth - 72)
+
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Text("扩展名").frame(width: extensionWidth, alignment: .leading)
+                    Text("文件类型 / UTType").frame(width: typeWidth, alignment: .leading)
+                    Text("当前默认 App").frame(width: defaultAppWidth, alignment: .leading)
+                    Color.clear.frame(width: actionWidth)
                 }
-                TableColumn("当前默认 App", value: \.defaultAppName) { row in
-                    HStack(spacing: 7) {
-                        AppIcon(url: row.currentDefault?.url, size: 25)
-                        Text(row.currentDefault?.name ?? "未设置").lineLimit(1)
-                        if row.isApplicationDefault {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                .padding(.horizontal, 12).frame(height: 30)
+                Divider()
+
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(rows) { row in
+                            HStack(spacing: 12) {
+                                Text(row.extensionText)
+                                    .font(.system(.callout, design: .monospaced))
+                                    .lineLimit(1).truncationMode(.tail)
+                                    .frame(width: extensionWidth, alignment: .leading)
+                                    .help(row.extensionText)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(row.type.displayName).lineLimit(1).truncationMode(.tail)
+                                    Text(row.type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
+                                .frame(width: typeWidth, alignment: .leading)
+                                .help("\(row.type.displayName)\n\(row.type.contentTypeIdentifier)")
+                                HStack(spacing: 7) {
+                                    AppIcon(url: row.currentDefault?.url, size: 25)
+                                    Text(row.currentDefault?.name ?? "未设置").lineLimit(1)
+                                    if row.isApplicationDefault {
+                                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
+                                    }
+                                }
+                                .frame(width: defaultAppWidth, alignment: .leading)
+                                Button("设为默认") { makeDefault(row.type) }
+                                    .buttonStyle(.borderless)
+                                    .disabled(row.isApplicationDefault)
+                                    .frame(width: actionWidth)
+                            }
+                            .padding(.horizontal, 12).frame(height: 52)
+                            .background(selected.contains(row.id) ? Color.accentColor.opacity(0.18) : Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selectRow(row.id) }
+                            Divider().padding(.leading, 12)
                         }
                     }
-                }.width(min: 160, ideal: 210)
-                TableColumn("") { row in
-                    Button("设为默认") { makeDefault(row.type) }
-                        .buttonStyle(.borderless)
-                        .disabled(row.isApplicationDefault)
-                }.width(70)
+                }
             }
-            .tableStyle(.inset(alternatesRowBackgrounds: false))
-            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func selectRow(_ id: SupportedType.ID) {
+        if NSEvent.modifierFlags.contains(.command) {
+            if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+        } else {
+            selected = [id]
         }
     }
 
@@ -152,7 +193,7 @@ private struct ApplicationDetailView: View {
             store.errorMessage = "此 UTType 没有声明可用于设置关联的文件扩展名。"
             return
         }
-        store.setDefault(application, for: types)
+        Task { await store.setDefault(application, for: types) }
     }
 
     private func makeSelectedDefault() {
@@ -163,7 +204,7 @@ private struct ApplicationDetailView: View {
             store.errorMessage = "所选类型没有可用于设置关联的文件扩展名。"
             return
         }
-        store.setDefault(application, for: unique)
+        Task { await store.setDefault(application, for: unique) }
     }
 }
 

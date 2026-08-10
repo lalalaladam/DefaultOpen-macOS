@@ -9,20 +9,18 @@ struct ContentView: View {
             VisualEffectView()
                 .ignoresSafeArea()
 
-            NavigationSplitView {
-                List(SidebarSection.allCases, selection: $section) { item in
-                    Label(item.rawValue, systemImage: item.symbol)
-                        .tag(item)
-                }
-                .scrollContentBackground(.hidden)
-                .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 230)
-            } detail: {
+            HStack(spacing: 0) {
+                SidebarView(selection: $section)
+                    .frame(width: 220)
+                Divider().opacity(0.45)
                 Group {
                     switch section ?? .fileTypes {
                     case .fileTypes: FileTypesView()
                     case .applications: ApplicationsView()
+                    case .defaultApps: DefaultAppsView()
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.clear)
             }
         }
@@ -44,5 +42,51 @@ struct ContentView: View {
                     }
             }
         }
+    }
+}
+
+private struct SidebarView: View {
+    @Binding var selection: SidebarSection?
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ForEach(SidebarSection.allCases) { item in
+                Button {
+                    selection = item
+                } label: {
+                    HStack(spacing: 10) {
+                        SidebarSymbol(name: item.symbol)
+                        Text(item.rawValue)
+                            .font(.body.weight(.medium))
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 38)
+                    .contentShape(Rectangle())
+                    .background {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(selection == item ? Color.accentColor : Color.clear)
+                    }
+                    .foregroundStyle(selection == item ? Color.white : Color.primary)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.top, 12)
+        .padding(.horizontal, 12)
+        .frame(maxHeight: .infinity)
+        .background(.ultraThinMaterial)
+    }
+}
+
+private struct SidebarSymbol: View {
+    let name: String
+
+    var body: some View {
+        Image(nsImage: NSImage(systemSymbolName: name, accessibilityDescription: nil)
+              ?? NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
+              ?? NSImage())
+            .frame(width: 22)
     }
 }

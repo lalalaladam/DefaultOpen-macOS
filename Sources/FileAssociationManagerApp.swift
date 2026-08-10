@@ -1,5 +1,7 @@
 import AppKit
+import CoreSpotlight
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
@@ -9,6 +11,7 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
+        registerSpotlightKeywords()
         showMainWindow()
     }
 
@@ -17,6 +20,29 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
             showMainWindow()
         }
         return true
+    }
+
+    func application(_ application: NSApplication, continue userActivity: NSUserActivity,
+                     restorationHandler: @escaping ([NSUserActivityRestoring]) -> Void) -> Bool {
+        guard userActivity.activityType == CSSearchableItemActionType else { return false }
+        showMainWindow()
+        return true
+    }
+
+    private func registerSpotlightKeywords() {
+        let attributes = CSSearchableItemAttributeSet(contentType: .application)
+        attributes.title = "DefaultOpen"
+        attributes.displayName = "DefaultOpen — 默认打开方式"
+        attributes.contentDescription = "管理默认应用、默认打开方式和文件关联"
+        attributes.keywords = ["默认", "默认打开", "默认应用", "文件关联", "扩展名", "打开方式"]
+        attributes.contentURL = Bundle.main.bundleURL
+        let item = CSSearchableItem(
+            uniqueIdentifier: "com.example.DefaultOpen.application",
+            domainIdentifier: "com.example.DefaultOpen",
+            attributeSet: attributes
+        )
+        item.expirationDate = .distantFuture
+        CSSearchableIndex.default().indexSearchableItems([item]) { _ in }
     }
 
     private func setupMainMenu() {
@@ -114,14 +140,14 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showMainWindow() {
+        var needsInitialReveal = false
         if mainWindowController == nil {
             let rootView = ContentView()
                 .environmentObject(store)
-                .frame(minWidth: 900, minHeight: 600)
-                .background(WindowConfigurator())
+                .frame(minWidth: 1180, minHeight: 680)
             let hostingController = NSHostingController(rootView: rootView)
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 1120, height: 720),
+                contentRect: NSRect(x: 0, y: 0, width: 1440, height: 800),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
@@ -129,13 +155,32 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
             window.title = "DefaultOpen"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.isMovableByWindowBackground = true
+            window.animationBehavior = .none
+            window.alphaValue = 0
             window.isReleasedWhenClosed = false
-            window.minSize = NSSize(width: 900, height: 600)
+            window.minSize = NSSize(width: 1180, height: 680)
             window.contentViewController = hostingController
+            window.contentView?.layoutSubtreeIfNeeded()
             window.center()
             mainWindowController = NSWindowController(window: window)
+            needsInitialReveal = true
         }
         mainWindowController?.showWindow(nil)
+        if needsInitialReveal {
+            guard let window = mainWindowController?.window else { return }
+            DispatchQueue.main.async {
+                window.contentView?.needsLayout = true
+                window.contentView?.layoutSubtreeIfNeeded()
+                window.displayIfNeeded()
+                window.alphaValue = 1
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            return
+        }
         mainWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

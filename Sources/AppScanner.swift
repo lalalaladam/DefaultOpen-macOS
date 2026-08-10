@@ -3,6 +3,16 @@ import UniformTypeIdentifiers
 
 struct AppScanner: Sendable {
     func scanInstalledApplications(managedTypes: [FileTypeInfo]) -> [ApplicationInfo] {
+        augmentWithLaunchServices(scanApplicationBundles(), managedTypes: managedTypes)
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func scanDeclaredFileTypes() -> [SupportedType] {
+        let types = scanApplicationBundles().flatMap(\.supportedTypes)
+        return Dictionary(grouping: types, by: \SupportedType.id).compactMap(\.value.first)
+    }
+
+    private func scanApplicationBundles() -> [ApplicationInfo] {
         let roots = [
             URL(fileURLWithPath: "/Applications"),
             URL(fileURLWithPath: "/System/Applications"),
@@ -11,19 +21,36 @@ struct AppScanner: Sendable {
         var apps: [String: ApplicationInfo] = [:]
 
         for root in roots where FileManager.default.fileExists(atPath: root.path) {
-            let keys: [URLResourceKey] = [.isApplicationKey, .isDirectoryKey]
-            guard let enumerator = FileManager.default.enumerator(
-                at: root,
-                includingPropertiesForKeys: keys,
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) else { continue }
-
-            for case let url as URL in enumerator where url.pathExtension.lowercased() == "app" {
+            for url in applicationURLs(in: root, maximumDepth: 2) {
                 if let app = applicationInfo(at: url) { apps[app.bundleIdentifier] = app }
             }
         }
-        return augmentWithLaunchServices(Array(apps.values), managedTypes: managedTypes)
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return Array(apps.values)
+    }
+
+    /// Installed applications normally live at the root or one grouping folder below it.
+    /// A depth-limited walk avoids accidentally traversing large unrelated directory trees.
+    private func applicationURLs(in root: URL, maximumDepth: Int) -> [URL] {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var result: [URL] = []
+        for child in children {
+            if child.pathExtension.lowercased() == "app" {
+                result.append(child)
+                continue
+            }
+            guard maximumDepth > 0,
+                  let values = try? child.resourceValues(forKeys: keys),
+                  values.isDirectory == true,
+                  values.isSymbolicLink != true else { continue }
+            result.append(contentsOf: applicationURLs(in: child, maximumDepth: maximumDepth - 1))
+        }
+        return result
     }
 
     /// Bundle document declarations are frequently incomplete. Launch Services' registered
@@ -32,9 +59,6 @@ struct AppScanner: Sendable {
     private func augmentWithLaunchServices(_ applications: [ApplicationInfo], managedTypes: [FileTypeInfo]) -> [ApplicationInfo] {
         let client = LaunchServicesClient()
         var knownTypes: [String: SupportedType] = [:]
-        for type in applications.flatMap(\.supportedTypes) {
-            knownTypes[type.contentTypeIdentifier] = type
-        }
         for type in managedTypes {
             knownTypes[type.contentTypeIdentifier] = SupportedType(
                 contentTypeIdentifier: type.contentTypeIdentifier,

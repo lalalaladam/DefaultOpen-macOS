@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct FileTypesView: View {
@@ -7,14 +8,11 @@ struct FileTypesView: View {
     @State private var presentedType: FileTypeInfo?
     @State private var addingExtension = false
     @State private var newExtension = ""
+    @State private var showsAllTypes = false
     @State private var sortOrder = [KeyPathComparator<FileTypeRow>(\.extensionName)]
 
     private var rows: [FileTypeRow] {
-        let types = searchText.isEmpty ? store.fileTypes : store.fileTypes.filter {
-            $0.extensionName.localizedCaseInsensitiveContains(searchText.trimmingCharacters(in: CharacterSet(charactersIn: ".")))
-            || $0.displayName.localizedCaseInsensitiveContains(searchText)
-            || $0.contentTypeIdentifier.localizedCaseInsensitiveContains(searchText)
-        }
+        let types = store.matchingFileTypes(for: searchText, includeAll: showsAllTypes)
         return types.map { type in
             let app = store.defaultApplication(for: type)
             return FileTypeRow(type: type, defaultApplication: app)
@@ -25,33 +23,7 @@ struct FileTypesView: View {
         VStack(spacing: 0) {
             header
             Divider().opacity(0.45)
-            Table(rows, selection: $selection, sortOrder: $sortOrder) {
-                TableColumn("扩展名", value: \.extensionName) { row in
-                    Text(row.type.dottedExtension).font(.system(.body, design: .monospaced).weight(.semibold))
-                }.width(min: 90, ideal: 110)
-                TableColumn("文件类型", value: \.displayName) { row in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(row.type.displayName)
-                        Text(row.type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                TableColumn("当前默认 App", value: \.defaultAppName) { row in
-                    DefaultAppLabel(application: row.defaultApplication)
-                }.width(min: 190, ideal: 240)
-                TableColumn("") { row in
-                    Button("更改…") { presentedType = row.type }.buttonStyle(.borderless)
-                }.width(58)
-            }
-            .tableStyle(.inset(alternatesRowBackgrounds: false))
-            .scrollContentBackground(.hidden)
-            .contextMenu(forSelectionType: FileTypeInfo.ID.self) { selected in
-                if selected.count == 1, let id = selected.first,
-                   let type = store.fileTypes.first(where: { $0.id == id }) {
-                    Button("更改默认打开程序…") { presentedType = type }
-                }
-            } primaryAction: { selected in
-                if let id = selected.first { presentedType = store.fileTypes.first { $0.id == id } }
-            }
+            fileTypeList
         }
         .sheet(item: $presentedType) { type in
             ApplicationPickerSheet(type: type, batchTypes: selectedTypes(including: type))
@@ -66,6 +38,67 @@ struct FileTypesView: View {
         } message: { Text("输入扩展名，不需要包含句点。") }
     }
 
+    private var fileTypeList: some View {
+        GeometryReader { proxy in
+            let extensionWidth: CGFloat = 96
+            let defaultAppWidth = min(220, max(160, proxy.size.width * 0.24))
+            let actionWidth: CGFloat = 62
+            let typeWidth = max(180, proxy.size.width - extensionWidth - defaultAppWidth - actionWidth - 72)
+
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Text("扩展名").frame(width: extensionWidth, alignment: .leading)
+                    Text("文件类型").frame(width: typeWidth, alignment: .leading)
+                    Text("当前默认 App").frame(width: defaultAppWidth, alignment: .leading)
+                    Color.clear.frame(width: actionWidth)
+                }
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                .padding(.horizontal, 12).frame(height: 30)
+                Divider()
+
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(rows) { row in
+                            HStack(spacing: 12) {
+                                Text(row.type.dottedExtension)
+                                    .font(.system(.body, design: .monospaced).weight(.semibold))
+                                    .lineLimit(1).frame(width: extensionWidth, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(row.type.displayName).lineLimit(1).truncationMode(.tail)
+                                    Text(row.type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
+                                .frame(width: typeWidth, alignment: .leading)
+                                .help("\(row.type.displayName)\n\(row.type.contentTypeIdentifier)")
+                                DefaultAppLabel(application: row.defaultApplication)
+                                    .frame(width: defaultAppWidth, alignment: .leading)
+                                Button("更改…") { presentedType = row.type }
+                                    .buttonStyle(.borderless).frame(width: actionWidth)
+                            }
+                            .padding(.horizontal, 12).frame(height: 52)
+                            .background(selection.contains(row.id) ? Color.accentColor.opacity(0.18) : Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) { presentedType = row.type }
+                            .onTapGesture { selectRow(row.id) }
+                            .contextMenu {
+                                Button("更改默认打开程序…") { presentedType = row.type }
+                            }
+                            Divider().padding(.leading, 12)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func selectRow(_ id: FileTypeInfo.ID) {
+        if NSEvent.modifierFlags.contains(.command) {
+            if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
+        } else {
+            selection = [id]
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
@@ -74,7 +107,25 @@ struct FileTypesView: View {
             }
             Spacer()
             if selection.count > 1 { Text("已选择 \(selection.count) 项").foregroundStyle(.secondary) }
-            SearchBox(prompt: "搜索扩展名", text: $searchText)
+            Button {
+                selection.removeAll()
+                if showsAllTypes {
+                    showsAllTypes = false
+                } else {
+                    showsAllTypes = true
+                    Task { await store.loadAllFileTypes() }
+                }
+            } label: {
+                if store.isLoadingFileTypes {
+                    Label("正在载入类型…", systemImage: "list.bullet")
+                } else {
+                    Label(showsAllTypes ? "仅显示常用类型" : "显示全部类型",
+                          systemImage: showsAllTypes ? "line.3.horizontal.decrease.circle.fill" : "list.bullet")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(store.isLoadingFileTypes)
+            SearchBox(prompt: "搜索扩展名或文件类型", text: $searchText)
             Button { addingExtension = true } label: { Label("添加扩展名", systemImage: "plus") }
                 .buttonStyle(.bordered)
         }
@@ -82,7 +133,7 @@ struct FileTypesView: View {
     }
 
     private func selectedTypes(including type: FileTypeInfo) -> [FileTypeInfo] {
-        let chosen = store.fileTypes.filter { selection.contains($0.id) }
+        let chosen = store.allFileTypes.filter { selection.contains($0.id) }
         return chosen.count > 1 && selection.contains(type.id) ? chosen : [type]
     }
 }
@@ -112,6 +163,7 @@ private struct ApplicationPickerSheet: View {
     let type: FileTypeInfo
     let batchTypes: [FileTypeInfo]
     @State private var applications: [ApplicationInfo] = []
+    @State private var isApplying = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -132,8 +184,11 @@ private struct ApplicationPickerSheet: View {
             } else {
                 List(applications) { app in
                     Button {
-                        store.setDefault(app, for: batchTypes)
-                        dismiss()
+                        isApplying = true
+                        Task { @MainActor in
+                            if await store.setDefault(app, for: batchTypes) { dismiss() }
+                            else { isApplying = false }
+                        }
                     } label: {
                         HStack(spacing: 12) {
                             AppIcon(url: app.url, size: 38)
@@ -146,8 +201,9 @@ private struct ApplicationPickerSheet: View {
                                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
                             }
                         }.padding(.vertical, 3)
-                    }.buttonStyle(.plain)
-                }.scrollContentBackground(.hidden)
+                    }.buttonStyle(.plain).disabled(isApplying)
+                }
+                .scrollContentBackground(.hidden)
             }
         }
         .frame(width: 520, height: 520)
