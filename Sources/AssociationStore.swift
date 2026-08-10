@@ -21,7 +21,7 @@ final class AssociationStore: ObservableObject {
     private var optimisticDefaultAppStatuses: [String: DefaultAppCategoryStatus] = [:]
 
     init() {
-        let saved = UserDefaults.standard.stringArray(forKey: savedKey) ?? []
+        let saved = customExtensionNames
         fileTypes = (starterExtensions + saved).uniqued().compactMap { try? launchServices.fileType(for: $0) }
             .sorted { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
         allFileTypes = fileTypes
@@ -72,17 +72,45 @@ final class AssociationStore: ObservableObject {
     func addExtension(_ value: String) -> Bool {
         do {
             let type = try launchServices.fileType(for: value)
-            guard !fileTypes.contains(where: { $0.id == type.id }) else { return true }
-            fileTypes.append(type)
-            fileTypes.sort { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
+            let isKnownType = allFileTypes.contains(where: { $0.id == type.id })
+            if !fileTypes.contains(where: { $0.id == type.id }) {
+                fileTypes.append(type)
+                fileTypes.sort { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
+            }
             mergeIntoFileTypeCatalog([type])
-            persistCustomExtensions()
+            if !isKnownType && !starterExtensions.contains(type.extensionName.lowercased()) {
+                var custom = customExtensionNames
+                if !custom.contains(type.extensionName.lowercased()) {
+                    custom.append(type.extensionName.lowercased())
+                    persistCustomExtensions(custom)
+                }
+            }
             refreshDefaults(for: [type])
             return true
         } catch {
             errorMessage = error.localizedDescription
             return false
         }
+    }
+
+    var customFileTypes: [FileTypeInfo] {
+        customExtensionNames.compactMap { extensionName in
+            fileTypes.first { $0.extensionName.caseInsensitiveCompare(extensionName) == .orderedSame }
+                ?? (try? launchServices.fileType(for: extensionName))
+        }.sorted { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
+    }
+
+    func isCustomFileType(_ type: FileTypeInfo) -> Bool {
+        customExtensionNames.contains(type.extensionName.lowercased())
+    }
+
+    func removeCustomExtension(_ type: FileTypeInfo) {
+        let extensionName = type.extensionName.lowercased()
+        guard customExtensionNames.contains(extensionName) else { return }
+        persistCustomExtensions(customExtensionNames.filter { $0 != extensionName })
+        fileTypes.removeAll { $0.extensionName.lowercased() == extensionName }
+        allFileTypes.removeAll { $0.extensionName.lowercased() == extensionName }
+        defaultsByContentType.removeValue(forKey: type.contentTypeIdentifier)
     }
 
     func defaultApplication(for type: FileTypeInfo) -> ApplicationInfo? {
@@ -342,7 +370,7 @@ final class AssociationStore: ObservableObject {
 
     func matchingFileTypes(for searchText: String, includeAll: Bool) -> [FileTypeInfo] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = includeAll ? allFileTypes : fileTypes
+        let source = includeAll ? allFileTypes : fileTypes.filter { !isCustomFileType($0) }
         guard !query.isEmpty else { return source }
 
         let extensionQuery = query.trimmingCharacters(in: CharacterSet(charactersIn: "."))
@@ -358,8 +386,16 @@ final class AssociationStore: ObservableObject {
         return matches
     }
 
-    private func persistCustomExtensions() {
-        UserDefaults.standard.set(fileTypes.map(\.extensionName), forKey: savedKey)
+    private var customExtensionNames: [String] {
+        let starterSet = Set(starterExtensions)
+        return (UserDefaults.standard.stringArray(forKey: savedKey) ?? [])
+            .map { $0.lowercased() }
+            .filter { !starterSet.contains($0) }
+            .uniqued()
+    }
+
+    private func persistCustomExtensions(_ extensions: [String]) {
+        UserDefaults.standard.set(extensions, forKey: savedKey)
     }
 
     private func mergeIntoFileTypeCatalog(_ types: [FileTypeInfo]) {
