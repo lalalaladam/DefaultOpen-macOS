@@ -1,0 +1,17 @@
+# Local build products
+/Build/
+/build/
+/DerivedData/
+
+# Xcode per-user state
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+
+# Swift Package Manager local output
+/.build/
+/.swiftpm/
+
+# macOS metadata
+.DS_Store
