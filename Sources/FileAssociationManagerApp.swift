@@ -6,10 +6,17 @@ import UniformTypeIdentifiers
 @MainActor
 final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     private let store = AssociationStore()
+    private let languageSettings = LanguageSettings.shared
     private var mainWindowController: NSWindowController?
     private var aboutWindowController: AboutWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(languageDidChange(_:)),
+            name: LanguageSettings.changedNotification,
+            object: nil
+        )
         setupMainMenu()
         registerSpotlightKeywords()
         showMainWindow()
@@ -32,13 +39,14 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     private func registerSpotlightKeywords() {
         let attributes = CSSearchableItemAttributeSet(contentType: .application)
         attributes.title = "DefaultOpen"
-        attributes.displayName = "DefaultOpen — 默认打开方式"
-        attributes.contentDescription = "管理默认应用、默认打开方式和文件关联"
-        attributes.keywords = ["默认", "默认打开", "默认应用", "文件关联", "扩展名", "打开方式"]
+        attributes.displayName = languageSettings.string("DefaultOpen — 默认打开方式")
+        attributes.contentDescription = languageSettings.string("管理默认应用、默认打开方式和文件关联")
+        attributes.keywords = languageSettings.string("默认,默认打开,默认应用,文件关联,扩展名,打开方式")
+            .components(separatedBy: ",")
         attributes.contentURL = Bundle.main.bundleURL
         let item = CSSearchableItem(
-            uniqueIdentifier: "com.example.DefaultOpen.application",
-            domainIdentifier: "com.example.DefaultOpen",
+            uniqueIdentifier: "com.lalalaladam.DefaultOpen.application",
+            domainIdentifier: "com.lalalaladam.DefaultOpen",
             attributeSet: attributes
         )
         item.expirationDate = .distantFuture
@@ -53,7 +61,7 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
 
         let aboutItem = NSMenuItem(
-            title: "About DefaultOpen",
+            title: languageSettings.string("About DefaultOpen"),
             action: #selector(showDefaultOpenCustomAbout(_:)),
             keyEquivalent: ""
         )
@@ -61,32 +69,41 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(aboutItem)
         appMenu.addItem(.separator())
 
-        let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
-        let servicesMenu = NSMenu(title: "Services")
+        let settingsItem = NSMenuItem(
+            title: languageSettings.string("Settings…"),
+            action: #selector(showLanguageSettings(_:)),
+            keyEquivalent: ","
+        )
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+
+        let servicesItem = NSMenuItem(title: languageSettings.string("Services"), action: nil, keyEquivalent: "")
+        let servicesMenu = NSMenu(title: languageSettings.string("Services"))
         servicesItem.submenu = servicesMenu
         appMenu.addItem(servicesItem)
         NSApp.servicesMenu = servicesMenu
         appMenu.addItem(.separator())
 
-        let hideItem = NSMenuItem(title: "Hide DefaultOpen",
+        let hideItem = NSMenuItem(title: languageSettings.string("Hide DefaultOpen"),
                                   action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         hideItem.target = NSApp
         appMenu.addItem(hideItem)
 
-        let hideOthersItem = NSMenuItem(title: "Hide Others",
+        let hideOthersItem = NSMenuItem(title: languageSettings.string("Hide Others"),
                                         action: #selector(NSApplication.hideOtherApplications(_:)),
                                         keyEquivalent: "h")
         hideOthersItem.keyEquivalentModifierMask = [.command, .option]
         hideOthersItem.target = NSApp
         appMenu.addItem(hideOthersItem)
 
-        let showAllItem = NSMenuItem(title: "Show All",
+        let showAllItem = NSMenuItem(title: languageSettings.string("Show All"),
                                      action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         showAllItem.target = NSApp
         appMenu.addItem(showAllItem)
         appMenu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit DefaultOpen",
+        let quitItem = NSMenuItem(title: languageSettings.string("Quit DefaultOpen"),
                                   action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.target = NSApp
         appMenu.addItem(quitItem)
@@ -98,38 +115,38 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func addEditMenu(to mainMenu: NSMenu) {
-        let root = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
-        let menu = NSMenu(title: "Edit")
+        let root = NSMenuItem(title: languageSettings.string("Edit"), action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: languageSettings.string("Edit"))
         root.submenu = menu
         mainMenu.addItem(root)
-        addResponderItem("Undo", action: Selector(("undo:")), key: "z", to: menu)
-        addResponderItem("Redo", action: Selector(("redo:")), key: "Z", to: menu)
+        addResponderItem(languageSettings.string("Undo"), action: Selector(("undo:")), key: "z", to: menu)
+        addResponderItem(languageSettings.string("Redo"), action: Selector(("redo:")), key: "Z", to: menu)
         menu.addItem(.separator())
-        addResponderItem("Cut", action: #selector(NSText.cut(_:)), key: "x", to: menu)
-        addResponderItem("Copy", action: #selector(NSText.copy(_:)), key: "c", to: menu)
-        addResponderItem("Paste", action: #selector(NSText.paste(_:)), key: "v", to: menu)
-        addResponderItem("Select All", action: #selector(NSText.selectAll(_:)), key: "a", to: menu)
+        addResponderItem(languageSettings.string("Cut"), action: #selector(NSText.cut(_:)), key: "x", to: menu)
+        addResponderItem(languageSettings.string("Copy"), action: #selector(NSText.copy(_:)), key: "c", to: menu)
+        addResponderItem(languageSettings.string("Paste"), action: #selector(NSText.paste(_:)), key: "v", to: menu)
+        addResponderItem(languageSettings.string("Select All"), action: #selector(NSText.selectAll(_:)), key: "a", to: menu)
     }
 
     private func addViewMenu(to mainMenu: NSMenu) {
-        let root = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
-        let menu = NSMenu(title: "View")
+        let root = NSMenuItem(title: languageSettings.string("View"), action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: languageSettings.string("View"))
         root.submenu = menu
         mainMenu.addItem(root)
-        let sidebar = NSMenuItem(title: "Toggle Sidebar", action: Selector(("toggleSidebar:")), keyEquivalent: "s")
+        let sidebar = NSMenuItem(title: languageSettings.string("Toggle Sidebar"), action: Selector(("toggleSidebar:")), keyEquivalent: "s")
         sidebar.keyEquivalentModifierMask = [.command, .control]
         sidebar.target = nil
         menu.addItem(sidebar)
     }
 
     private func addWindowMenu(to mainMenu: NSMenu) {
-        let root = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
-        let menu = NSMenu(title: "Window")
+        let root = NSMenuItem(title: languageSettings.string("Window"), action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: languageSettings.string("Window"))
         root.submenu = menu
         mainMenu.addItem(root)
-        addResponderItem("Close", action: #selector(NSWindow.performClose(_:)), key: "w", to: menu)
-        addResponderItem("Minimize", action: #selector(NSWindow.performMiniaturize(_:)), key: "m", to: menu)
-        addResponderItem("Zoom", action: #selector(NSWindow.performZoom(_:)), key: "", to: menu)
+        addResponderItem(languageSettings.string("Close"), action: #selector(NSWindow.performClose(_:)), key: "w", to: menu)
+        addResponderItem(languageSettings.string("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), key: "m", to: menu)
+        addResponderItem(languageSettings.string("Zoom"), action: #selector(NSWindow.performZoom(_:)), key: "", to: menu)
         NSApp.windowsMenu = menu
     }
 
@@ -144,6 +161,8 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
         if mainWindowController == nil {
             let rootView = ContentView()
                 .environmentObject(store)
+                .environmentObject(languageSettings)
+                .environment(\.locale, languageSettings.language.locale)
                 .frame(minWidth: 1180, minHeight: 680)
             let hostingController = NSHostingController(rootView: rootView)
             let window = NSWindow(
@@ -212,21 +231,34 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     @objc func showDefaultOpenCustomAbout(_ sender: Any?) {
         NSApp.activate(ignoringOtherApps: true)
         if aboutWindowController == nil {
-            aboutWindowController = AboutWindowController()
+            aboutWindowController = AboutWindowController(languageSettings: languageSettings)
         }
         aboutWindowController?.rebuildContent()
         aboutWindowController?.present()
     }
+
+    @objc private func showLanguageSettings(_ sender: Any?) {
+        showMainWindow()
+        NotificationCenter.default.post(name: LanguageSettings.showSettingsNotification, object: nil)
+    }
+
+    @objc private func languageDidChange(_ notification: Notification) {
+        setupMainMenu()
+        registerSpotlightKeywords()
+        aboutWindowController?.rebuildContent()
+    }
 }
 
 final class AboutWindowController: NSWindowController {
+    private let languageSettings: LanguageSettings
 #if DEBUG
     private static let contentSize = NSSize(width: 600, height: 528)
 #else
     private static let contentSize = NSSize(width: 540, height: 428)
 #endif
 
-    init() {
+    init(languageSettings: LanguageSettings) {
+        self.languageSettings = languageSettings
         let size = Self.contentSize
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -250,7 +282,7 @@ final class AboutWindowController: NSWindowController {
     func rebuildContent() {
         guard let window else { return }
         let size = Self.contentSize
-        window.title = "About DefaultOpen"
+        window.title = languageSettings.string("About DefaultOpen")
         let content = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
         content.material = .underWindowBackground
         content.blendingMode = .behindWindow
@@ -295,9 +327,7 @@ final class AboutWindowController: NSWindowController {
         top -= 19
 
         let credits = label(
-            "Project Information\n\nGitHub: github.com/lalalaladam/FileAssociationManager\n\n" +
-            "Built with Swift, SwiftUI, Launch Services, and Uniform Type Identifiers.\n\n" +
-            "DefaultOpen is an independent native macOS utility for inspecting and managing file associations.",
+            languageSettings.string("about.projectInformation"),
             size: 12,
             color: .secondaryLabelColor
         )

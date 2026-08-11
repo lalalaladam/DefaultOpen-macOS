@@ -5,9 +5,9 @@ import UniformTypeIdentifiers
 @MainActor
 func chooseApplicationURL() -> URL? {
     let panel = NSOpenPanel()
-    panel.title = "选择 App"
-    panel.prompt = "选择"
-    panel.message = "请选择一个能够处理目标类型的 App。"
+    panel.title = L10n.string("选择 App")
+    panel.prompt = L10n.string("选择")
+    panel.message = L10n.string("请选择一个能够处理目标类型的 App。")
     panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
     panel.allowedContentTypes = [.applicationBundle]
     panel.canChooseFiles = true
@@ -51,11 +51,12 @@ struct TranslucentRow: ViewModifier {
 }
 
 struct SearchBox: View {
+    @EnvironmentObject private var languageSettings: LanguageSettings
     let prompt: String
     @Binding var text: String
 
     var body: some View {
-        NativeSearchField(prompt: prompt, text: $text)
+        NativeSearchField(prompt: languageSettings.string(prompt), text: $text)
             .frame(width: 220, height: 28)
     }
 }

@@ -40,25 +40,30 @@ final class AssociationStore: ObservableObject {
         }.filter { !$0.isEmpty }.uniqued()
 
         guard !normalizedTitle.isEmpty else {
-            errorMessage = "请输入组合名称。"
+            errorMessage = L10n.string("请输入组合名称。")
             return false
         }
         guard !normalizedExtensions.isEmpty else {
-            errorMessage = "请至少添加一个文件扩展名。"
+            errorMessage = L10n.string("请至少添加一个文件扩展名。")
             return false
         }
         let invalidExtensions = normalizedExtensions.filter {
             (try? launchServices.fileType(for: $0)) == nil
         }
         guard invalidExtensions.isEmpty else {
-            errorMessage = "无法识别扩展名：\(invalidExtensions.joined(separator: "、"))"
+            errorMessage = L10n.format(
+                "error.unrecognizedExtensions",
+                invalidExtensions.joined(separator: L10n.string("list.separator"))
+            )
             return false
         }
 
         let category = DefaultAppCategory(
             id: id ?? "custom.\(UUID().uuidString.lowercased())",
             title: normalizedTitle,
-            subtitle: normalizedSubtitle.isEmpty ? normalizedExtensions.map { "." + $0 }.joined(separator: "、") : normalizedSubtitle,
+            subtitle: normalizedSubtitle.isEmpty
+                ? normalizedExtensions.map { "." + $0 }.joined(separator: L10n.string("list.separator"))
+                : normalizedSubtitle,
             symbol: symbol,
             coreExtensions: normalizedExtensions,
             optionalExtensions: [],
@@ -324,7 +329,7 @@ final class AssociationStore: ObservableObject {
             }
 
             guard !operations.isEmpty || !unchangedTargets.isEmpty else {
-                errorMessage = "\(application.name) 没有注册为这些格式的打开程序。"
+                errorMessage = L10n.format("error.notRegisteredForFormats", application.name)
                 return nil
             }
 
@@ -353,8 +358,8 @@ final class AssociationStore: ObservableObject {
             )
             defaultAppRevision += 1
             successMessage = changedTargets.isEmpty
-                ? "\(application.name) 已经是\(category.title)"
-                : "已将 \(application.name) 设为\(category.title)"
+                ? L10n.format("success.alreadyCategoryDefault", application.name, category.title)
+                : L10n.format("success.setCategoryDefault", application.name, category.title)
             if !changedTargets.isEmpty { verifyDefaultAppStatus(application, for: category) }
             return DefaultAppChangeResult(changedTargets: changedTargets,
                                           skippedTargets: skippedTargets,
@@ -387,10 +392,10 @@ final class AssociationStore: ObservableObject {
             }
             refreshDefaults(for: uniqueTypes)
             successMessage = typesToChange.isEmpty
-                ? "这些文件类型已经由 \(application.name) 打开"
+                ? L10n.format("success.typesAlreadyUseApp", application.name)
                 : typesToChange.count == 1
-                    ? "已将 \(application.name) 设为 \(typesToChange[0].dottedExtension) 的默认打开程序"
-                    : "已将 \(application.name) 设为 \(typesToChange.count) 种文件的默认打开程序"
+                    ? L10n.format("success.setExtensionDefault", application.name, typesToChange[0].dottedExtension)
+                    : L10n.format("success.setMultipleDefaults", application.name, typesToChange.count)
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(350))
                 refreshDefaults(for: uniqueTypes)
@@ -565,7 +570,7 @@ final class AssociationStore: ObservableObject {
             self.defaultAppRevision += 1
             let finalStatus = self.systemDefaultAppStatus(for: category)
             if finalStatus.unifiedApplication?.bundleIdentifier != application.bundleIdentifier {
-                self.errorMessage = "系统未能统一更新\(category.title)，请查看仍由其他 App 负责的格式。"
+                self.errorMessage = L10n.format("error.unifiedUpdateFailed", category.title)
             }
         }
     }

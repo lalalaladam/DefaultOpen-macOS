@@ -13,13 +13,13 @@ enum AssociationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidExtension(let value): "无法识别文件扩展名：\(value)"
-        case .invalidApplication(let url): "所选项目不是有效的 App：\(url.lastPathComponent)"
-        case .missingBundleIdentifier(let url): "应用缺少 Bundle Identifier：\(url.lastPathComponent)"
-        case .missingApplicationExecutable(let url): "应用缺少可执行文件：\(url.lastPathComponent)"
+        case .invalidExtension(let value): L10n.format("error.invalidExtension", value)
+        case .invalidApplication(let url): L10n.format("error.invalidApplication", url.lastPathComponent)
+        case .missingBundleIdentifier(let url): L10n.format("error.missingBundleIdentifier", url.lastPathComponent)
+        case .missingApplicationExecutable(let url): L10n.format("error.missingApplicationExecutable", url.lastPathComponent)
         case .incompatibleApplication(let name, let targets):
-            "\(name) 没有声明支持：\(targets.joined(separator: "、"))"
-        case .launchServices(let status): "Launch Services 修改失败（OSStatus \(status)）"
+            L10n.format("error.incompatibleApplication", name, targets.joined(separator: L10n.string("list.separator")))
+        case .launchServices(let status): L10n.format("error.launchServices", status)
         }
     }
 }

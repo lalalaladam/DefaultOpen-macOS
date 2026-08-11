@@ -75,7 +75,10 @@ struct ApplicationsView: View {
             SearchBox(prompt: "搜索应用或文件类型", text: $searchText)
                 .help("可按应用名称、Bundle Identifier、扩展名或文件类型筛选。")
             Button { Task { await store.scanApplications() } } label: {
-                Label(store.isScanning ? "正在扫描…" : "重新扫描", systemImage: "arrow.clockwise")
+                Label(
+                    LanguageSettings.shared.string(store.isScanning ? "正在扫描…" : "重新扫描"),
+                    systemImage: "arrow.clockwise"
+                )
                     .frame(width: 96)
             }
             .buttonStyle(.bordered)
@@ -125,7 +128,8 @@ private struct ApplicationDetailView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(application.name).font(.title2.weight(.semibold))
                     Text(application.bundleIdentifier).font(.callout).foregroundStyle(.secondary)
-                    Text("支持 \(application.supportedTypes.count) 种文档类型").font(.caption).foregroundStyle(.tertiary)
+                    Text(L10n.format("application.supportedTypeCount", application.supportedTypes.count))
+                        .font(.caption).foregroundStyle(.tertiary)
                 }
                 Spacer()
                 if !selected.isEmpty {
@@ -185,7 +189,7 @@ private struct ApplicationDetailView: View {
                                 .help("\(row.type.displayName)\n\(row.type.contentTypeIdentifier)")
                                 HStack(spacing: 7) {
                                     AppIcon(url: row.currentDefault?.url, size: 25)
-                                    Text(row.currentDefault?.name ?? "未设置").lineLimit(1)
+                                    Text(row.currentDefault?.name ?? L10n.string("未设置")).lineLimit(1)
                                     if row.isApplicationDefault {
                                         Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
                                     }
@@ -224,7 +228,7 @@ private struct ApplicationDetailView: View {
     private func makeDefault(_ supportedType: SupportedType) {
         let types = store.fileTypes(for: supportedType)
         guard !types.isEmpty else {
-            store.errorMessage = "此 UTType 没有声明可用于设置关联的文件扩展名。"
+            store.errorMessage = L10n.string("此 UTType 没有声明可用于设置关联的文件扩展名。")
             return
         }
         pendingDefaultChange = PendingDefaultChange(types: types, supportedTypeCount: 1)
@@ -235,21 +239,21 @@ private struct ApplicationDetailView: View {
             .flatMap { store.fileTypes(for: $0) }
         let unique = Dictionary(grouping: types, by: \FileTypeInfo.id).compactMap(\.value.first)
         guard !unique.isEmpty else {
-            store.errorMessage = "所选类型没有可用于设置关联的文件扩展名。"
+            store.errorMessage = L10n.string("所选类型没有可用于设置关联的文件扩展名。")
             return
         }
         pendingDefaultChange = PendingDefaultChange(types: unique, supportedTypeCount: selected.count)
     }
 
     private var confirmationTitle: String {
-        guard let change = pendingDefaultChange else { return "确认设为默认？" }
-        return change.supportedTypeCount == 1 ? "确认设为默认？" : "确认批量设为默认？"
+        guard let change = pendingDefaultChange else { return L10n.string("确认设为默认？") }
+        return L10n.string(change.supportedTypeCount == 1 ? "确认设为默认？" : "确认批量设为默认？")
     }
 
     private var confirmationMessage: String {
         guard let change = pendingDefaultChange else { return "" }
-        let targets = change.types.map(\.dottedExtension).joined(separator: "、")
-        return "将使用 \(application.name) 默认打开 \(targets)。继续后，macOS 还可能要求系统确认。"
+        let targets = change.types.map(\.dottedExtension).joined(separator: L10n.string("list.separator"))
+        return L10n.format("application.confirmationMessage", application.name, targets)
     }
 
     private func applyPendingDefaultChange() {
@@ -268,7 +272,7 @@ private struct ApplicationDetailView: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Text(title)
+                Text(LanguageSettings.shared.string(title))
                 if sortColumn == column {
                     Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
                         .font(.caption2.weight(.bold))

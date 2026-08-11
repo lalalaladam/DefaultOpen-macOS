@@ -2,13 +2,15 @@ import SwiftUI
 
 struct DefaultAppsView: View {
     @EnvironmentObject private var store: AssociationStore
+    @EnvironmentObject private var languageSettings: LanguageSettings
     @State private var presentedCategory: DefaultAppCategory?
     @State private var editorRequest: DefaultAppCategoryEditorRequest?
     @State private var categoryPendingDeletion: DefaultAppCategory?
     @State private var refreshID = UUID()
 
     private var categories: [DefaultAppCategory] {
-        DefaultAppCategory.all + store.customDefaultAppCategories
+        _ = languageSettings.language
+        return DefaultAppCategory.all + store.customDefaultAppCategories
     }
 
     var body: some View {
@@ -71,7 +73,7 @@ struct DefaultAppsView: View {
             set: { if !$0 { categoryPendingDeletion = nil } }
         ), titleVisibility: .visible) {
             if let category = categoryPendingDeletion {
-                Button("删除“\(category.title)”", role: .destructive) {
+                Button(L10n.format("action.deleteGroup", category.title), role: .destructive) {
                     store.removeCustomDefaultAppCategory(category)
                     categoryPendingDeletion = nil
                     refreshID = UUID()
@@ -133,7 +135,7 @@ private struct DefaultAppCategoryCard: View {
                     Image(systemName: "ellipsis.circle")
                 }
                 .menuStyle(.borderlessButton)
-                .help(category.isCustom ? "管理自定义组合" : "复制内置组合")
+                .help(LanguageSettings.shared.string(category.isCustom ? "管理自定义组合" : "复制内置组合"))
             }
         }
         .padding(16)
@@ -149,8 +151,14 @@ private struct DefaultAppCategoryCard: View {
         if status.isUnified, let app = status.unifiedApplication {
             HStack(spacing: 6) {
                 AppIcon(url: app.url, size: 20)
-                Text(app.name).lineLimit(1)
-                Text("当前默认").foregroundStyle(.secondary)
+                Text(app.name)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text("当前默认")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
             }
             .font(.body.weight(.medium))
         } else {
@@ -158,15 +166,19 @@ private struct DefaultAppCategoryCard: View {
                 Label("尚未统一", systemImage: "exclamationmark.circle")
                     .font(.body.weight(.medium)).foregroundStyle(.orange)
                 ForEach(status.assignments.prefix(2)) { assignment in
-                    Text("\(assignment.application.name)：\(assignment.targets.joined(separator: "、"))")
+                    Text(L10n.format(
+                        "status.assignment",
+                        assignment.application.name,
+                        assignment.targets.joined(separator: L10n.string("list.separator"))
+                    ))
                         .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }
                 if status.assignments.count > 2 {
-                    Text("另有 \(status.assignments.count - 2) 个 App…")
+                    Text(L10n.format("status.moreApps", status.assignments.count - 2))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 if !status.missingTargets.isEmpty {
-                    Text("未设置：\(status.missingTargets.joined(separator: "、"))")
+                    Text(L10n.format("status.notSet", status.missingTargets.joined(separator: L10n.string("list.separator"))))
                         .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
@@ -204,7 +216,7 @@ private struct DefaultAppCategoryEditorSheet: View {
         self.onSave = onSave
         let category = request.category
         _title = State(initialValue: request.duplicatesCategory
-                       ? "\(category?.title ?? "") 副本" : category?.title ?? "")
+                       ? L10n.format("group.copyName", category?.title ?? "") : category?.title ?? "")
         _subtitle = State(initialValue: category?.subtitle ?? "")
         _symbol = State(initialValue: category?.symbol ?? "folder")
         _extensionText = State(initialValue: category?.coreExtensions.joined(separator: ", ") ?? "")
@@ -226,7 +238,7 @@ private struct DefaultAppCategoryEditorSheet: View {
             HStack(spacing: 12) {
                 Image(systemName: symbol).font(.system(size: 25)).foregroundStyle(.tint).frame(width: 38)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(editingID == nil ? "新建自定义组合" : "编辑自定义组合")
+                    Text(LanguageSettings.shared.string(editingID == nil ? "新建自定义组合" : "编辑自定义组合"))
                         .font(.title2.weight(.semibold))
                     Text("把一组文件扩展名统一设置为同一个默认 App")
                         .font(.callout).foregroundStyle(.secondary)
@@ -262,7 +274,7 @@ private struct DefaultAppCategoryEditorSheet: View {
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                     .buttonStyle(.plain)
-                                    .help("移除 .\(extensionName)")
+                                    .help(L10n.format("action.removeExtension", extensionName))
                                 }
                                 .padding(.horizontal, 8).padding(.vertical, 5)
                                 .background(.secondary.opacity(0.12), in: Capsule())
@@ -278,7 +290,7 @@ private struct DefaultAppCategoryEditorSheet: View {
                         Label("从所有类型选择…", systemImage: "checklist")
                     }
                     Spacer()
-                    Text("已包含 \(normalizedExtensions.count) 个扩展名")
+                    Text(L10n.format("status.extensionCount", normalizedExtensions.count))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -373,7 +385,7 @@ private struct DefaultAppFileTypeSelectionSheet: View {
             Divider()
 
             HStack {
-                Button(allVisibleSelected ? "取消选择搜索结果" : "全选搜索结果") {
+                Button(LanguageSettings.shared.string(allVisibleSelected ? "取消选择搜索结果" : "全选搜索结果")) {
                     let visible = Set(rows.map { $0.extensionName.lowercased() })
                     if allVisibleSelected {
                         selected.subtract(visible)
@@ -388,7 +400,7 @@ private struct DefaultAppFileTypeSelectionSheet: View {
                     ProgressView().controlSize(.small)
                     Text("正在载入所有类型…").foregroundStyle(.secondary)
                 } else {
-                    Text("找到 \(rows.count) 项").foregroundStyle(.secondary)
+                    Text(L10n.format("status.resultCount", rows.count)).foregroundStyle(.secondary)
                 }
             }
             .font(.callout)
@@ -431,7 +443,7 @@ private struct DefaultAppFileTypeSelectionSheet: View {
 
             Divider()
             HStack {
-                Text("已选择 \(selected.count) 项")
+                Text(L10n.format("status.selectedCount", selected.count))
                     .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -508,11 +520,15 @@ private struct DefaultAppPickerSheet: View {
                 }
                 if !currentStatus.isUnified {
                     ForEach(currentStatus.assignments) { assignment in
-                        Text("\(assignment.application.name)：\(assignment.targets.joined(separator: "、"))")
+                        Text(L10n.format(
+                            "status.assignment",
+                            assignment.application.name,
+                            assignment.targets.joined(separator: L10n.string("list.separator"))
+                        ))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     if !currentStatus.missingTargets.isEmpty {
-                        Text("未设置：\(currentStatus.missingTargets.joined(separator: "、"))")
+                        Text(L10n.format("status.notSet", currentStatus.missingTargets.joined(separator: L10n.string("list.separator"))))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
@@ -524,7 +540,7 @@ private struct DefaultAppPickerSheet: View {
                 Divider()
                 Toggle(isOn: $includesOptional) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(category.urlSchemes.isEmpty ? "包括扩展格式" : "同时设置本地网页文件")
+                    Text(LanguageSettings.shared.string(category.urlSchemes.isEmpty ? "包括扩展格式" : "同时设置本地网页文件"))
                         Text(optionalDescription).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -555,7 +571,7 @@ private struct DefaultAppPickerSheet: View {
                                 Text(candidate.application.bundleIdentifier)
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 if !candidate.currentTargets.isEmpty && !candidate.isCurrentDefault {
-                                    Text("当前负责：\(candidate.currentTargets.joined(separator: "、"))")
+                                    Text(L10n.format("status.currentTargets", candidate.currentTargets.joined(separator: L10n.string("list.separator"))))
                                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                             }
@@ -565,7 +581,7 @@ private struct DefaultAppPickerSheet: View {
                                     Label("当前默认", systemImage: "checkmark.circle.fill")
                                         .font(.callout.weight(.medium)).foregroundStyle(.green)
                                 }
-                                Text("支持 \(candidate.supportedCount)/\(candidate.totalCount)")
+                                Text(L10n.format("status.supportedFraction", candidate.supportedCount, candidate.totalCount))
                                     .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                             }
                         }
@@ -580,17 +596,17 @@ private struct DefaultAppPickerSheet: View {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 if let candidate = selectedCandidate {
-                    Text("将 \(candidate.application.name) 设为\(category.title)")
+                    Text(L10n.format("picker.setCategory", candidate.application.name, category.title))
                         .font(.headline)
-                    Text("将修改：\(candidate.supportedTargets.joined(separator: "、"))")
+                    Text(L10n.format("picker.willChange", candidate.supportedTargets.joined(separator: L10n.string("list.separator"))))
                         .font(.callout).foregroundStyle(.secondary).lineLimit(2)
                     let estimatedChanges = candidate.supportedTargets.filter {
                         !candidate.currentTargets.contains($0)
                     }.count
-                    Text("预计需要修改 \(estimatedChanges) 项；macOS 可能逐项询问确认。")
+                    Text(L10n.format("picker.estimatedChanges", estimatedChanges))
                         .font(.caption).foregroundStyle(.secondary)
                     if !candidate.unsupportedTargets.isEmpty {
-                        Text("不会修改（应用未声明支持）：\(candidate.unsupportedTargets.joined(separator: "、"))")
+                        Text(L10n.format("picker.unsupportedTargets", candidate.unsupportedTargets.joined(separator: L10n.string("list.separator"))))
                             .font(.callout).foregroundStyle(.orange).lineLimit(2)
                     }
                 } else {
@@ -619,7 +635,7 @@ private struct DefaultAppPickerSheet: View {
                             ProgressView().controlSize(.small)
                             Text("正在设置…")
                         } else {
-                            Text("设为\(category.title)")
+                            Text(L10n.format("action.setAsCategory", category.title))
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -642,12 +658,12 @@ private struct DefaultAppPickerSheet: View {
     }
 
     private var targetDescription: String {
-        if !category.urlSchemes.isEmpty { return "处理 HTTP 和 HTTPS 网页链接" }
-        return category.coreExtensions.map { "." + $0 }.joined(separator: "、")
+        if !category.urlSchemes.isEmpty { return L10n.string("处理 HTTP 和 HTTPS 网页链接") }
+        return category.coreExtensions.map { "." + $0 }.joined(separator: L10n.string("list.separator"))
     }
 
     private var optionalDescription: String {
-        category.optionalExtensions.map { "." + $0 }.joined(separator: "、")
+        category.optionalExtensions.map { "." + $0 }.joined(separator: L10n.string("list.separator"))
     }
 
     private func reloadCandidates() {
@@ -708,14 +724,14 @@ private struct DefaultAppPickerSheet: View {
             if let result = await store.setDefault(candidate.application, for: category,
                                                    includingOptional: includesOptional,
                                                    progress: { current, total, target in
-                progressText = "正在设置 \(current)/\(total)：\(target)"
+                progressText = L10n.format("progress.setting", current, total, target)
             }) {
                 didChange()
                 let skipped = result.skippedTargets.isEmpty
-                    ? "" : "；跳过：\(result.skippedTargets.joined(separator: "、"))"
+                    ? "" : L10n.format("result.skipped", result.skippedTargets.joined(separator: L10n.string("list.separator")))
                 let unchanged = result.unchangedTargets.isEmpty
-                    ? "" : "；无需修改 \(result.unchangedTargets.count) 项"
-                resultMessage = "已修改 \(result.changedTargets.count) 项\(unchanged)\(skipped)"
+                    ? "" : L10n.format("result.unchanged", result.unchangedTargets.count)
+                resultMessage = L10n.format("result.changed", result.changedTargets.count, unchanged, skipped)
                 progressText = nil
                 try? await Task.sleep(for: .milliseconds(850))
                 dismiss()

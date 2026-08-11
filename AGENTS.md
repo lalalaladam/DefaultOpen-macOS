@@ -15,6 +15,19 @@
 - Do not discard or overwrite existing user changes.
 - Generated build products must remain excluded from Git.
 
+## Official Releases
+
+- Before preparing or publishing an official release, read and follow:
+
+      STANDARD_RELEASE_WORKFLOW.md
+
+- A request to build or package a Release app does not authorize committing,
+  pushing, tagging, or creating a GitHub Release.
+- This project has no Apple Developer Program membership. Official artifacts
+  use ad-hoc signing and must not be described as Developer ID signed,
+  notarized, or stapled.
+- Release builds must be created from a clean, committed source state.
+
 ## Build Metadata
 
 Use the Git commit count as the numeric build number:

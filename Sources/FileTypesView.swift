@@ -56,7 +56,7 @@ struct FileTypesView: View {
             set: { if !$0 { typePendingDeletion = nil } }
         ), titleVisibility: .visible) {
             if let type = typePendingDeletion {
-                Button("删除 \(type.dottedExtension)", role: .destructive) {
+                Button(L10n.format("action.deleteExtension", type.dottedExtension), role: .destructive) {
                     store.removeCustomExtension(type)
                     typePendingDeletion = nil
                 }
@@ -176,19 +176,19 @@ struct FileTypesView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: 180)
+            .frame(width: 220)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
             .onChange(of: showsAllTypes) { _, includeAll in
                 if includeAll {
                     Task { await store.loadAllFileTypes() }
                 }
             }
-            ZStack {
-                if store.isLoadingFileTypes {
-                    ProgressView()
-                        .controlSize(.small)
-                        .help("正在载入全部类型…")
-                }
-            }
+            ProgressView()
+                .controlSize(.small)
+                .opacity(store.isLoadingFileTypes ? 1 : 0)
+                .accessibilityHidden(!store.isLoadingFileTypes)
+                .help("正在载入全部类型…")
             .frame(width: 16, height: 16)
             SearchBox(prompt: "搜索扩展名或文件类型", text: $searchText)
             Button { addingExtension = true } label: { Label("添加扩展名", systemImage: "plus") }
@@ -214,7 +214,7 @@ struct FileTypesView: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Text(title)
+                Text(LanguageSettings.shared.string(title))
                 if sortColumn == column {
                     Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
                         .font(.caption2.weight(.bold))
@@ -284,7 +284,7 @@ private struct CustomExtensionsSheet: View {
                             Image(systemName: "trash")
                         }
                         .buttonStyle(.borderless)
-                        .help("删除 \(type.dottedExtension)")
+                        .help(L10n.format("action.deleteExtension", type.dottedExtension))
                     }
                     .padding(.vertical, 4)
                 }
@@ -306,7 +306,7 @@ private struct CustomExtensionsSheet: View {
             set: { if !$0 { typePendingDeletion = nil } }
         ), titleVisibility: .visible) {
             if let type = typePendingDeletion {
-                Button("删除 \(type.dottedExtension)", role: .destructive) {
+                Button(L10n.format("action.deleteExtension", type.dottedExtension), role: .destructive) {
                     store.removeCustomExtension(type)
                     typePendingDeletion = nil
                 }
@@ -332,7 +332,8 @@ private struct DefaultAppLabel: View {
     var body: some View {
         HStack(spacing: 8) {
             AppIcon(url: application?.url, size: 28)
-            Text(application?.name ?? "未设置").foregroundStyle(application == nil ? .secondary : .primary)
+            Text(application?.name ?? L10n.string("未设置"))
+                .foregroundStyle(application == nil ? .secondary : .primary)
         }
     }
 }
@@ -354,7 +355,7 @@ private struct ApplicationPickerSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(type.dottedExtension) 的打开方式")
+                    Text(L10n.format("picker.openWithTitle", type.dottedExtension))
                         .font(.title2.weight(.semibold))
                     Text("先选择一个 App，再确认设为默认").foregroundStyle(.secondary)
                 }
@@ -393,9 +394,9 @@ private struct ApplicationPickerSheet: View {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 if let app = selectedApplication {
-                    Text("将 \(app.name) 设为 \(type.dottedExtension) 的默认 App")
+                    Text(L10n.format("picker.setAppForExtension", app.name, type.dottedExtension))
                         .font(.headline)
-                    Text("修改后，所有 \(type.dottedExtension) 文件将默认使用此 App 打开。")
+                    Text(L10n.format("picker.extensionExplanation", type.dottedExtension))
                         .font(.callout).foregroundStyle(.secondary)
                 } else {
                     Text("请先选择一个 App。点击应用不会立即修改系统设置。")

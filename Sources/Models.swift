@@ -14,18 +14,40 @@ struct ApplicationInfo: Identifiable, Hashable, Sendable {
 struct SupportedType: Identifiable, Hashable, Sendable {
     let contentTypeIdentifier: String
     let extensions: [String]
-    let displayName: String
+    private let systemDisplayName: String
+
+    init(contentTypeIdentifier: String, extensions: [String], displayName: String) {
+        self.contentTypeIdentifier = contentTypeIdentifier
+        self.extensions = extensions
+        systemDisplayName = displayName
+    }
 
     var id: String { contentTypeIdentifier + extensions.joined(separator: ",") }
+    var displayName: String {
+        L10n.fileTypeDisplayName(systemName: systemDisplayName,
+                                 extensions: extensions,
+                                 identifier: contentTypeIdentifier)
+    }
 }
 
 struct FileTypeInfo: Identifiable, Hashable, Sendable {
     let extensionName: String
     let contentTypeIdentifier: String
-    let displayName: String
+    private let systemDisplayName: String
+
+    init(extensionName: String, contentTypeIdentifier: String, displayName: String) {
+        self.extensionName = extensionName
+        self.contentTypeIdentifier = contentTypeIdentifier
+        systemDisplayName = displayName
+    }
 
     var id: String { extensionName.lowercased() }
     var dottedExtension: String { "." + extensionName }
+    var displayName: String {
+        L10n.fileTypeDisplayName(systemName: systemDisplayName,
+                                 extensions: [extensionName],
+                                 identifier: contentTypeIdentifier)
+    }
 }
 
 enum SidebarSection: String, CaseIterable, Identifiable {
@@ -57,37 +79,40 @@ struct DefaultAppCategory: Identifiable, Hashable, Codable {
         coreExtensions + (includingOptional ? optionalExtensions : [])
     }
 
-    static let all: [DefaultAppCategory] = [
-        .init(id: "browser", title: "默认浏览器", subtitle: "网页链接与可选的本地网页文件",
+    @MainActor static var all: [DefaultAppCategory] {
+        let localize = LanguageSettings.shared.string
+        return [
+        .init(id: "browser", title: localize("默认浏览器"), subtitle: localize("网页链接与可选的本地网页文件"),
               symbol: "safari", coreExtensions: [], optionalExtensions: ["html", "htm", "webarchive"],
               urlSchemes: ["http", "https"]),
-        .init(id: "video", title: "默认视频播放器", subtitle: "常见视频文件的默认播放器",
+        .init(id: "video", title: localize("默认视频播放器"), subtitle: localize("常见视频文件的默认播放器"),
               symbol: "play.rectangle", coreExtensions: ["mp4", "mov", "m4v"],
               optionalExtensions: ["mkv", "avi", "webm", "mpeg"], urlSchemes: []),
-        .init(id: "music", title: "默认音乐播放器", subtitle: "常见音频文件的默认播放器",
+        .init(id: "music", title: localize("默认音乐播放器"), subtitle: localize("常见音频文件的默认播放器"),
               symbol: "music.note", coreExtensions: ["mp3", "m4a", "aac", "wav"],
               optionalExtensions: ["flac", "ogg", "aiff"], urlSchemes: []),
-        .init(id: "image", title: "默认图片查看器", subtitle: "常见图片文件的默认查看器",
+        .init(id: "image", title: localize("默认图片查看器"), subtitle: localize("常见图片文件的默认查看器"),
               symbol: "photo", coreExtensions: ["jpg", "jpeg", "png", "heic", "gif"],
               optionalExtensions: ["webp", "tiff", "bmp", "svg"], urlSchemes: []),
-        .init(id: "pdf", title: "默认 PDF 阅读器", subtitle: "PDF 文档的默认阅读器",
+        .init(id: "pdf", title: localize("默认 PDF 阅读器"), subtitle: localize("PDF 文档的默认阅读器"),
               symbol: "doc.richtext", coreExtensions: ["pdf"], optionalExtensions: [], urlSchemes: []),
-        .init(id: "text", title: "默认文本编辑器", subtitle: "纯文本与常见文本文件",
+        .init(id: "text", title: localize("默认文本编辑器"), subtitle: localize("纯文本与常见文本文件"),
               symbol: "doc.plaintext", coreExtensions: ["txt", "log"],
               optionalExtensions: ["md", "rtf", "json", "xml", "yaml", "yml", "csv"], urlSchemes: []),
-        .init(id: "archive", title: "默认解压软件", subtitle: "压缩包与归档文件的默认处理程序",
+        .init(id: "archive", title: localize("默认解压软件"), subtitle: localize("压缩包与归档文件的默认处理程序"),
               symbol: "archivebox", coreExtensions: ["zip", "rar", "7z"],
               optionalExtensions: ["tar", "gz", "bz2", "xz"], urlSchemes: []),
-        .init(id: "word", title: "默认 Word 文档 App", subtitle: "文字处理文档的默认编辑器",
+        .init(id: "word", title: localize("默认 Word 文档 App"), subtitle: localize("文字处理文档的默认编辑器"),
               symbol: "doc.text", coreExtensions: ["doc", "docx"],
               optionalExtensions: ["odt"], urlSchemes: []),
-        .init(id: "spreadsheet", title: "默认电子表格 App", subtitle: "工作簿与电子表格的默认编辑器",
+        .init(id: "spreadsheet", title: localize("默认电子表格 App"), subtitle: localize("工作簿与电子表格的默认编辑器"),
               symbol: "tablecells", coreExtensions: ["xls", "xlsx"],
               optionalExtensions: ["ods", "csv"], urlSchemes: []),
-        .init(id: "presentation", title: "默认演示文稿 App", subtitle: "幻灯片文件的默认编辑器",
+        .init(id: "presentation", title: localize("默认演示文稿 App"), subtitle: localize("幻灯片文件的默认编辑器"),
               symbol: "rectangle.on.rectangle.angled", coreExtensions: ["ppt", "pptx"],
               optionalExtensions: ["odp"], urlSchemes: [])
-    ]
+        ]
+    }
 }
 
 struct DefaultAppCandidate: Identifiable {
