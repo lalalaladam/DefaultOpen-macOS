@@ -113,9 +113,12 @@ struct LaunchServicesClient: Sendable {
 
     private func lightweightApplication(bundleID: String, url: URL) -> ApplicationInfo {
         let bundle = Bundle(url: url)
-        let name = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+        let fallbackName = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
             ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
             ?? url.deletingPathExtension().lastPathComponent
+        let localName = FileManager.default.displayName(atPath: url.path)
+            .replacingOccurrences(of: ".app", with: "", options: [.anchored, .backwards])
+        let name = localName.isEmpty ? fallbackName : localName
         return ApplicationInfo(bundleIdentifier: bundleID, name: name, url: url, supportedTypes: [])
     }
 }

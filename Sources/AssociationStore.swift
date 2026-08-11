@@ -204,10 +204,8 @@ final class AssociationStore: ObservableObject {
     func validatedDefaultAppCandidate(at url: URL, for category: DefaultAppCategory,
                                       includingOptional: Bool) throws -> DefaultAppCandidate {
         let application = try scanner.applicationInfo(at: url)
-        let coreTargets = defaultAppTargets(for: category, includingOptional: false,
-                                            includeCapabilities: false)
-        let targets = defaultAppTargets(for: category, includingOptional: includingOptional,
-                                        includeCapabilities: false)
+        let coreTargets = defaultAppDisplayTargets(for: category, includingOptional: false)
+        let targets = defaultAppDisplayTargets(for: category, includingOptional: includingOptional)
         let unsupportedCore = coreTargets.filter { !applicationSupports(application, target: $0) }
         guard unsupportedCore.isEmpty else {
             throw AssociationError.incompatibleApplication(application.name, unsupportedCore.map(\.label))
@@ -295,20 +293,26 @@ final class AssociationStore: ObservableObject {
             }
         }
 
+        let displayCoreTargets = defaultAppDisplayTargets(for: category, includingOptional: false)
+        let displayTargets = defaultAppDisplayTargets(for: category, includingOptional: includingOptional)
         return appsByID.values.compactMap { app in
             let coveredKeys = coverage[app.bundleIdentifier, default: []]
             guard coveredKeys.isSuperset(of: requiredKeys) else { return nil }
-            let currentTargets = targets.filter {
+            guard displayCoreTargets.allSatisfy({ applicationSupports(app, target: $0) }) else { return nil }
+            let supportedTargets = displayTargets.filter { applicationSupports(app, target: $0) }
+            let currentTargets = displayTargets.filter {
                 $0.defaultApplication?.bundleIdentifier == app.bundleIdentifier
             }.map(\.label)
-            let isCurrentDefault = targets.allSatisfy {
+            let isCurrentDefault = displayTargets.allSatisfy {
                 $0.defaultApplication?.bundleIdentifier == app.bundleIdentifier
             }
             return DefaultAppCandidate(application: app,
-                                       supportedCount: coveredKeys.count,
-                                       totalCount: targets.count,
-                                       supportedTargets: targets.filter { coveredKeys.contains($0.key) }.map(\.label),
-                                       unsupportedTargets: targets.filter { !coveredKeys.contains($0.key) }.map(\.label),
+                                       supportedCount: supportedTargets.count,
+                                       totalCount: displayTargets.count,
+                                       supportedTargets: supportedTargets.map(\.label),
+                                       unsupportedTargets: displayTargets.filter {
+                                           !applicationSupports(app, target: $0)
+                                       }.map(\.label),
                                        currentTargets: currentTargets,
                                        isCurrentDefault: isCurrentDefault)
         }.sorted {
@@ -559,6 +563,31 @@ final class AssociationStore: ObservableObject {
                                         ? launchServices.capableApplications(for: type) : [])
         }
         return targets
+    }
+
+    private func defaultAppDisplayTargets(for category: DefaultAppCategory,
+                                          includingOptional: Bool) -> [DefaultAppTarget] {
+        let schemeTargets = category.urlSchemes.map { scheme in
+            DefaultAppTarget(
+                key: "scheme:\(scheme)",
+                label: scheme.uppercased(),
+                kind: .urlScheme(scheme),
+                defaultApplication: launchServices.defaultApplication(forURLScheme: scheme),
+                capableApplications: []
+            )
+        }
+        let fileTargets = category.extensions(includingOptional: includingOptional)
+            .compactMap { ext -> DefaultAppTarget? in
+            guard let type = try? launchServices.fileType(for: ext) else { return nil }
+            return DefaultAppTarget(
+                key: "extension:\(ext)",
+                label: "." + ext,
+                kind: .fileType(type),
+                defaultApplication: launchServices.defaultApplication(for: type),
+                capableApplications: []
+            )
+        }
+        return schemeTargets + fileTargets
     }
 
     private func applicationSupports(_ application: ApplicationInfo, target: DefaultAppTarget) -> Bool {

@@ -7,6 +7,16 @@ struct ApplicationInfo: Identifiable, Hashable, Sendable {
     let name: String
     let url: URL
     let supportedTypes: [SupportedType]
+    let searchAliases: [String]
+
+    init(bundleIdentifier: String, name: String, url: URL,
+         supportedTypes: [SupportedType], searchAliases: [String] = []) {
+        self.bundleIdentifier = bundleIdentifier
+        self.name = name
+        self.url = url
+        self.supportedTypes = supportedTypes
+        self.searchAliases = searchAliases
+    }
 
     var id: String { bundleIdentifier }
 }

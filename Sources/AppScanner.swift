@@ -90,7 +90,7 @@ struct AppScanner: Sendable {
             return ApplicationInfo(bundleIdentifier: app.bundleIdentifier, name: app.name, url: app.url,
                                    supportedTypes: merged.values.sorted {
                 $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
-            })
+            }, searchAliases: app.searchAliases)
         }
     }
 
@@ -106,11 +106,16 @@ struct AppScanner: Sendable {
             throw AssociationError.missingApplicationExecutable(url)
         }
         let info = bundle.infoDictionary ?? [:]
-        let name = (info["CFBundleDisplayName"] as? String)
+        let fallbackName = (info["CFBundleDisplayName"] as? String)
             ?? (info["CFBundleName"] as? String)
             ?? url.deletingPathExtension().lastPathComponent
+        let localName = FileManager.default.displayName(atPath: url.path)
+            .replacingOccurrences(of: ".app", with: "", options: [.anchored, .backwards])
+        let name = localName.isEmpty ? fallbackName : localName
+        let aliases = applicationNameAliases(bundle: bundle, url: url, info: info, displayName: name)
         let types = parseDocumentTypes(info: info)
-        return ApplicationInfo(bundleIdentifier: bundleID, name: name, url: url, supportedTypes: types)
+        return ApplicationInfo(bundleIdentifier: bundleID, name: name, url: url,
+                               supportedTypes: types, searchAliases: aliases)
     }
 
     func supportedURLSchemes(at url: URL) -> Set<String> {
@@ -169,6 +174,44 @@ struct AppScanner: Sendable {
         if let values = value as? [String] { return values }
         if let value = value as? String { return [value] }
         return []
+    }
+
+    private func applicationNameAliases(bundle: Bundle, url: URL,
+                                        info: [String: Any], displayName: String) -> [String] {
+        var names = [
+            displayName,
+            url.deletingPathExtension().lastPathComponent,
+            info["CFBundleDisplayName"] as? String,
+            info["CFBundleName"] as? String,
+            bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String,
+            bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
+        ].compactMap { $0 }
+
+        let resourcesURL = bundle.resourceURL
+        let localizedFiles = resourcesURL.flatMap {
+            try? FileManager.default.contentsOfDirectory(at: $0,
+                                                         includingPropertiesForKeys: nil,
+                                                         options: [.skipsHiddenFiles])
+        }?.filter { $0.pathExtension == "lproj" }
+            .map { $0.appendingPathComponent("InfoPlist.strings") } ?? []
+
+        for fileURL in localizedFiles {
+            guard let data = try? Data(contentsOf: fileURL),
+                  let dictionary = try? PropertyListSerialization.propertyList(
+                    from: data, options: [], format: nil
+                  ) as? [String: Any] else { continue }
+            names.append(contentsOf: [
+                dictionary["CFBundleDisplayName"] as? String,
+                dictionary["CFBundleName"] as? String
+            ].compactMap { $0 })
+        }
+
+        var seen = Set<String>()
+        return names.filter {
+            let normalized = $0.folding(options: [.caseInsensitive, .diacriticInsensitive],
+                                        locale: .current)
+            return !$0.isEmpty && seen.insert(normalized).inserted
+        }
     }
 
     private func preferredExtensions(for type: UTType?) -> [String] {

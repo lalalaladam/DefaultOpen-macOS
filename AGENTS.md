@@ -61,6 +61,11 @@ Rules:
 - Never overwrite an earlier archived Debug build.
 - The archive must contain the runnable `.app` built from that exact source state.
 - `Build/` must remain ignored by Git.
+- Debug builds must use a temporary DerivedData directory outside `Build/`.
+- After copying and verifying the archived app, unregister and remove the temporary build product.
+- `Build/` must not retain DerivedData directories.
+- The only runnable app retained for each Debug build must be the archived app in its
+  `Build/Debug-<BuildNumber>-<GitHash>-<Timestamp>/` directory.
 
 ## About Window
 

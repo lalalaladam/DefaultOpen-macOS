@@ -12,6 +12,7 @@ struct ApplicationsView: View {
         let ext = query.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
         return store.applications.filter { app in
             app.name.localizedCaseInsensitiveContains(query)
+            || app.searchAliases.contains { $0.localizedCaseInsensitiveContains(query) }
             || app.bundleIdentifier.localizedCaseInsensitiveContains(query)
             || app.supportedTypes.contains { type in
                 type.extensions.contains(ext)
