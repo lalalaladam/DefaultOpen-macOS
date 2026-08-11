@@ -499,6 +499,10 @@ private struct DefaultAppPickerSheet: View {
         store.defaultAppStatus(for: category)
     }
 
+    private var optionalStatus: DefaultAppCategoryStatus {
+        store.optionalDefaultAppStatus(for: category)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -538,6 +542,38 @@ private struct DefaultAppPickerSheet: View {
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
+                if category.hasOptionalExtensions {
+                    Divider().padding(.vertical, 3)
+                    HStack(spacing: 8) {
+                        Text(L10n.string("扩展格式状态：")).foregroundStyle(.secondary)
+                        if let app = optionalStatus.unifiedApplication {
+                            AppIcon(url: app.url, size: 18)
+                            Text(app.name).fontWeight(.medium)
+                            Text(optionalDescription).foregroundStyle(.secondary)
+                        } else {
+                            Text(L10n.string("尚未统一"))
+                                .fontWeight(.medium).foregroundStyle(.orange)
+                        }
+                        Spacer()
+                    }
+                    if !optionalStatus.isUnified {
+                        ForEach(optionalStatus.assignments) { assignment in
+                            Text(L10n.format(
+                                "status.assignment",
+                                assignment.application.name,
+                                assignment.targets.joined(separator: L10n.string("list.separator"))
+                            ))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        if !optionalStatus.missingTargets.isEmpty {
+                            Text(L10n.format(
+                                "status.notSet",
+                                optionalStatus.missingTargets.joined(separator: L10n.string("list.separator"))
+                            ))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                }
             }
             .font(.callout)
             .padding(.horizontal, 20).padding(.vertical, 10)
@@ -546,7 +582,11 @@ private struct DefaultAppPickerSheet: View {
                 Divider()
                 Toggle(isOn: $includesOptional) {
                     VStack(alignment: .leading, spacing: 2) {
-                    Text(LanguageSettings.shared.string(category.urlSchemes.isEmpty ? "包括扩展格式" : "同时设置本地网页文件"))
+                    Text(LanguageSettings.shared.string(
+                        category.urlSchemes.isEmpty
+                            ? "同时设为扩展格式的默认 App"
+                            : "同时设为本地网页文件的默认 App"
+                    ))
                         Text(optionalDescription).font(.caption).foregroundStyle(.secondary)
                     }
                 }

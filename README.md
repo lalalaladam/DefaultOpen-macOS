@@ -18,7 +18,7 @@ AppKit 和 Launch Services 构建，不依赖 `duti` 或其他第三方命令行
 - 按应用名称、Bundle Identifier、扩展名或文件类型搜索。
 - 管理浏览器、视频、音乐、图片、PDF、文本和办公文档等默认应用组合。
 - 创建自定义扩展名和自定义默认应用组合。
-- 支持简体中文、English 和跟随系统的界面语言设置。
+- 支持简体中文和 English 界面语言设置。
 
 ### 系统要求
 
@@ -98,7 +98,7 @@ Services and does not depend on `duti` or other third-party command-line tools.
 - Search by app name, bundle identifier, extension, or file type.
 - Manage grouped defaults for browsers, video, music, images, PDFs, text, and office documents.
 - Create custom extensions and custom default-app groups.
-- Use Simplified Chinese, English, or the system-default interface language.
+- Use either Simplified Chinese or English as the interface language.
 
 ### Requirements
 

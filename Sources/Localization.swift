@@ -24,7 +24,7 @@ enum L10n {
 
     static func string(_ key: String) -> String {
         let saved = UserDefaults.standard.string(forKey: "appLanguage")
-        let language = AppLanguage(rawValue: saved ?? "") ?? .system
+        let language = AppLanguage.resolved(savedValue: saved)
         return string(key, language: language)
     }
 
@@ -40,7 +40,7 @@ enum L10n {
                                     extensions: [String],
                                     identifier: String) -> String {
         let saved = UserDefaults.standard.string(forKey: "appLanguage")
-        let language = AppLanguage(rawValue: saved ?? "") ?? .system
+        let language = AppLanguage.resolved(savedValue: saved)
         if let fileExtension = extensions.first?.lowercased(),
            let key = curatedFileTypeKeys[fileExtension] {
             return string(key, language: language)
@@ -54,21 +54,18 @@ enum L10n {
 
     private static var locale: Locale {
         let saved = UserDefaults.standard.string(forKey: "appLanguage")
-        return (AppLanguage(rawValue: saved ?? "") ?? .system).locale
+        return AppLanguage.resolved(savedValue: saved).locale
     }
 
     private static func localizedBundle(for language: AppLanguage) -> Bundle {
-        let localization: String?
+        let localization: String
         switch language {
-        case .system:
-            localization = Bundle.preferredLocalizations(from: Bundle.main.localizations).first
         case .simplifiedChinese:
             localization = "zh-Hans"
         case .english:
             localization = "en"
         }
-        guard let localization,
-              let path = Bundle.main.path(forResource: localization, ofType: "lproj"),
+        guard let path = Bundle.main.path(forResource: localization, ofType: "lproj"),
               let bundle = Bundle(path: path) else {
             return .main
         }
@@ -86,7 +83,6 @@ private extension String {
 }
 
 enum AppLanguage: String, CaseIterable, Identifiable {
-    case system
     case simplifiedChinese = "zh-Hans"
     case english = "en"
 
@@ -94,7 +90,6 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
     var displayNameKey: String {
         switch self {
-        case .system: "跟随系统"
         case .simplifiedChinese: "简体中文"
         case .english: "English"
         }
@@ -102,10 +97,15 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
     var locale: Locale {
         switch self {
-        case .system: .autoupdatingCurrent
         case .simplifiedChinese: Locale(identifier: "zh-Hans")
         case .english: Locale(identifier: "en")
         }
+    }
+
+    static func resolved(savedValue: String?) -> AppLanguage {
+        if let savedValue, let saved = AppLanguage(rawValue: savedValue) { return saved }
+        let preferred = Locale.preferredLanguages.first ?? ""
+        return preferred.hasPrefix("zh") ? .simplifiedChinese : .english
     }
 }
 
@@ -128,7 +128,8 @@ final class LanguageSettings: ObservableObject {
 
     private init() {
         let saved = UserDefaults.standard.string(forKey: storageKey)
-        language = AppLanguage(rawValue: saved ?? "") ?? .system
+        language = AppLanguage.resolved(savedValue: saved)
+        UserDefaults.standard.set(language.rawValue, forKey: storageKey)
     }
 
     func string(_ key: String) -> String {

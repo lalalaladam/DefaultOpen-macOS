@@ -76,7 +76,7 @@ final class AssociationStore: ObservableObject {
             customDefaultAppCategories.append(category)
         }
         persistCustomDefaultAppCategories()
-        optimisticDefaultAppStatuses.removeValue(forKey: category.id)
+        removeOptimisticDefaultAppStatuses(for: category)
         defaultAppRevision += 1
         return true
     }
@@ -84,7 +84,7 @@ final class AssociationStore: ObservableObject {
     func removeCustomDefaultAppCategory(_ category: DefaultAppCategory) {
         guard category.isCustom else { return }
         customDefaultAppCategories.removeAll { $0.id == category.id }
-        optimisticDefaultAppStatuses.removeValue(forKey: category.id)
+        removeOptimisticDefaultAppStatuses(for: category)
         persistCustomDefaultAppCategories()
         defaultAppRevision += 1
     }
@@ -225,20 +225,44 @@ final class AssociationStore: ObservableObject {
             supportedTargets: supported.map(\.label),
             unsupportedTargets: unsupported.map(\.label),
             currentTargets: currentTargets,
-            isCurrentDefault: coreTargets.allSatisfy {
+            isCurrentDefault: targets.allSatisfy {
                 $0.defaultApplication?.bundleIdentifier == application.bundleIdentifier
             }
         )
     }
 
-    func defaultAppStatus(for category: DefaultAppCategory) -> DefaultAppCategoryStatus {
+    func defaultAppStatus(for category: DefaultAppCategory,
+                          includingOptional: Bool = false) -> DefaultAppCategoryStatus {
         _ = defaultAppRevision
-        if let optimistic = optimisticDefaultAppStatuses[category.id] { return optimistic }
-        return systemDefaultAppStatus(for: category)
+        let statusKey = defaultAppStatusKey(for: category, includingOptional: includingOptional)
+        if let optimistic = optimisticDefaultAppStatuses[statusKey] { return optimistic }
+        return systemDefaultAppStatus(for: category, includingOptional: includingOptional)
     }
 
-    private func systemDefaultAppStatus(for category: DefaultAppCategory) -> DefaultAppCategoryStatus {
-        let targets = defaultAppTargets(for: category, includingOptional: false, includeCapabilities: false)
+    func optionalDefaultAppStatus(for category: DefaultAppCategory) -> DefaultAppCategoryStatus {
+        _ = defaultAppRevision
+        let optionalCategory = DefaultAppCategory(
+            id: category.id + ".optional-status",
+            title: category.title,
+            subtitle: category.subtitle,
+            symbol: category.symbol,
+            coreExtensions: category.optionalExtensions,
+            optionalExtensions: [],
+            urlSchemes: []
+        )
+        let targets = defaultAppTargets(for: optionalCategory, includingOptional: false,
+                                        includeCapabilities: false)
+        return defaultAppStatus(from: targets)
+    }
+
+    private func systemDefaultAppStatus(for category: DefaultAppCategory,
+                                        includingOptional: Bool) -> DefaultAppCategoryStatus {
+        let targets = defaultAppTargets(for: category, includingOptional: includingOptional,
+                                        includeCapabilities: false)
+        return defaultAppStatus(from: targets)
+    }
+
+    private func defaultAppStatus(from targets: [DefaultAppTarget]) -> DefaultAppCategoryStatus {
         let missingTargets = targets.filter { $0.defaultApplication == nil }.map(\.label)
         let assignedTargets = targets.compactMap { target -> (ApplicationInfo, String)? in
             guard let app = target.defaultApplication else { return nil }
@@ -277,7 +301,7 @@ final class AssociationStore: ObservableObject {
             let currentTargets = targets.filter {
                 $0.defaultApplication?.bundleIdentifier == app.bundleIdentifier
             }.map(\.label)
-            let isCurrentDefault = coreTargets.allSatisfy {
+            let isCurrentDefault = targets.allSatisfy {
                 $0.defaultApplication?.bundleIdentifier == app.bundleIdentifier
             }
             return DefaultAppCandidate(application: app,
@@ -360,18 +384,23 @@ final class AssociationStore: ObservableObject {
             }
 
             refreshDefaults(for: changedTypes)
-            let coreLabels = defaultAppTargets(for: category, includingOptional: false,
-                                               includeCapabilities: false).map(\.label)
-            optimisticDefaultAppStatuses[category.id] = DefaultAppCategoryStatus(
-                unifiedApplication: application,
-                assignments: [DefaultAppAssignment(application: application, targets: coreLabels)],
-                missingTargets: []
-            )
+            let statusKey = defaultAppStatusKey(for: category, includingOptional: includingOptional)
+            let selectedLabels = defaultAppTargets(for: category, includingOptional: includingOptional,
+                                                   includeCapabilities: false).map(\.label)
+            if skippedTargets.isEmpty {
+                optimisticDefaultAppStatuses[statusKey] = DefaultAppCategoryStatus(
+                    unifiedApplication: application,
+                    assignments: [DefaultAppAssignment(application: application, targets: selectedLabels)],
+                    missingTargets: []
+                )
+            }
             defaultAppRevision += 1
             successMessage = changedTargets.isEmpty
                 ? L10n.format("success.alreadyCategoryDefault", application.name, category.title)
                 : L10n.format("success.setCategoryDefault", application.name, category.title)
-            if !changedTargets.isEmpty { verifyDefaultAppStatus(application, for: category) }
+            if !changedTargets.isEmpty && skippedTargets.isEmpty {
+                verifyDefaultAppStatus(application, for: category, includingOptional: includingOptional)
+            }
             return DefaultAppChangeResult(changedTargets: changedTargets,
                                           skippedTargets: skippedTargets,
                                           unchangedTargets: unchangedTargets)
@@ -562,24 +591,38 @@ final class AssociationStore: ObservableObject {
         }
     }
 
+    private func defaultAppStatusKey(for category: DefaultAppCategory,
+                                     includingOptional: Bool) -> String {
+        "\(category.id)|\(includingOptional ? "all" : "core")"
+    }
+
+    private func removeOptimisticDefaultAppStatuses(for category: DefaultAppCategory) {
+        let prefix = category.id + "|"
+        optimisticDefaultAppStatuses = optimisticDefaultAppStatuses.filter {
+            !$0.key.hasPrefix(prefix)
+        }
+    }
+
     private func verifyDefaultAppStatus(_ application: ApplicationInfo,
-                                        for category: DefaultAppCategory) {
+                                        for category: DefaultAppCategory,
+                                        includingOptional: Bool) {
         Task { @MainActor [weak self] in
             guard let self else { return }
+            let statusKey = self.defaultAppStatusKey(for: category, includingOptional: includingOptional)
             for delay in [350, 900, 1_800] {
                 try? await Task.sleep(for: .milliseconds(delay))
-                guard self.optimisticDefaultAppStatuses[category.id]?
+                guard self.optimisticDefaultAppStatuses[statusKey]?
                     .unifiedApplication?.bundleIdentifier == application.bundleIdentifier else { return }
-                let status = self.systemDefaultAppStatus(for: category)
+                let status = self.systemDefaultAppStatus(for: category, includingOptional: includingOptional)
                 if status.unifiedApplication?.bundleIdentifier == application.bundleIdentifier {
-                    self.optimisticDefaultAppStatuses.removeValue(forKey: category.id)
+                    self.optimisticDefaultAppStatuses.removeValue(forKey: statusKey)
                     self.defaultAppRevision += 1
                     return
                 }
             }
-            self.optimisticDefaultAppStatuses.removeValue(forKey: category.id)
+            self.optimisticDefaultAppStatuses.removeValue(forKey: statusKey)
             self.defaultAppRevision += 1
-            let finalStatus = self.systemDefaultAppStatus(for: category)
+            let finalStatus = self.systemDefaultAppStatus(for: category, includingOptional: includingOptional)
             if finalStatus.unifiedApplication?.bundleIdentifier != application.bundleIdentifier {
                 self.errorMessage = L10n.format("error.unifiedUpdateFailed", category.title)
             }

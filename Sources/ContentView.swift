@@ -109,7 +109,7 @@ private struct SidebarView: View {
 private struct LanguageSettingsView: View {
     @EnvironmentObject private var languageSettings: LanguageSettings
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedLanguage: AppLanguage = .system
+    @State private var selectedLanguage: AppLanguage = .simplifiedChinese
     @State private var pendingLanguage: AppLanguage?
     @State private var languagePromptTask: Task<Void, Never>?
 
@@ -132,7 +132,6 @@ private struct LanguageSettingsView: View {
                         requestLanguageChange(newLanguage)
                     }
                 )) {
-                    Text(L10n.string("跟随系统")).tag(AppLanguage.system)
                     Text(L10n.string("简体中文")).tag(AppLanguage.simplifiedChinese)
                     Text(L10n.string("English")).tag(AppLanguage.english)
                 }
