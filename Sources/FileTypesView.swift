@@ -167,7 +167,10 @@ struct FileTypesView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(L10n.string("文件类型")).font(.title2.weight(.semibold))
-                Text(L10n.string("查看和更改文件的默认打开方式")).font(.callout).foregroundStyle(.secondary)
+                Text(L10n.string("查看和更改文件的默认打开方式"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             Spacer()
             Picker(L10n.string("显示范围"), selection: $showsAllTypes) {
@@ -176,8 +179,7 @@ struct FileTypesView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: 220)
-            .fixedSize(horizontal: true, vertical: false)
+            .frame(width: 240)
             .layoutPriority(1)
             .onChange(of: showsAllTypes) { _, includeAll in
                 if includeAll {

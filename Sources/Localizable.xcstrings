@@ -35,7 +35,7 @@
     "文件类型" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"File Types"}}}},
     "应用程序" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Applications"}}}},
     "默认 App" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Default Apps"}}}},
-    "查看和更改文件的默认打开方式" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"View and change the default apps for files"}}}},
+    "查看和更改文件的默认打开方式" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Manage default apps"}}}},
     "扩展名" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Extension"}}}},
     "当前默认 App" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Current Default App"}}}},
     "更改…" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Change…"}}}},
