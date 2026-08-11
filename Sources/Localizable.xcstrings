@@ -30,7 +30,11 @@
     "语言" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Language"}}}},
     "跟随系统" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"System Default"}}}},
     "简体中文" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Simplified Chinese"}}}},
-    "切换会立即应用；系统提供的应用名称和文件类型名称仍可能跟随 macOS 语言。" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Changes apply immediately. App names and file type names supplied by the system may still follow the macOS language."}}}},
+    "English" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"English"}},"en":{"stringUnit":{"state":"translated","value":"English"}}}},
+    "选择后需要确认；系统提供的应用名称和文件类型名称仍可能跟随 macOS 语言。" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"You will be asked to confirm your selection. App names and file type names supplied by the system may still follow the macOS language."}}}},
+    "确认切换语言？" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Change Language?"}}}},
+    "切换语言" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Change Language"}}}},
+    "language.confirmationMessage" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"界面语言将切换为%@。"}},"en":{"stringUnit":{"state":"translated","value":"The interface language will change to %@."}}}},
     "完成" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Done"}}}},
     "文件类型" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"File Types"}}}},
     "应用程序" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Applications"}}}},
@@ -213,7 +217,9 @@
     "result.unchanged" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"；无需修改 %ld 项"}},"en":{"stringUnit":{"state":"translated","value":"; %ld unchanged"}}}},
     "result.changed" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"已修改 %ld 项%@%@"}},"en":{"stringUnit":{"state":"translated","value":"Changed %ld items%@%@"}}}},
     "picker.openWithTitle" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ 的打开方式"}},"en":{"stringUnit":{"state":"translated","value":"Open %@ With"}}}},
-    "status.assignment" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"%@：%@"}},"en":{"stringUnit":{"state":"translated","value":"%@: %@"}}}}
+    "status.assignment" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"%@：%@"}},"en":{"stringUnit":{"state":"translated","value":"%@: %@"}}}},
+    "search.noResults" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"没有找到“%@”"}},"en":{"stringUnit":{"state":"translated","value":"No Results for “%@”"}}}},
+    "请尝试其他搜索关键词。" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Try a different search term."}}}}
   },
   "version" : "1.0"
 }

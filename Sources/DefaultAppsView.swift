@@ -17,15 +17,15 @@ struct DefaultAppsView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("默认 App").font(.title2.weight(.semibold))
-                    Text("一次设置一组常用文件格式或网页链接的默认应用")
+                    Text(L10n.string("默认 App")).font(.title2.weight(.semibold))
+                    Text(L10n.string("一次设置一组常用文件格式或网页链接的默认应用"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button {
                     editorRequest = DefaultAppCategoryEditorRequest(category: nil)
                 } label: {
-                    Label("新建组合…", systemImage: "plus")
+                    Label(L10n.string("新建组合…"), systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
             }
@@ -68,7 +68,7 @@ struct DefaultAppsView: View {
                 return false
             }
         }
-        .confirmationDialog("删除自定义组合？", isPresented: Binding(
+        .confirmationDialog(L10n.string("删除自定义组合？"), isPresented: Binding(
             get: { categoryPendingDeletion != nil },
             set: { if !$0 { categoryPendingDeletion = nil } }
         ), titleVisibility: .visible) {
@@ -79,9 +79,9 @@ struct DefaultAppsView: View {
                     refreshID = UUID()
                 }
             }
-            Button("取消", role: .cancel) { categoryPendingDeletion = nil }
+            Button(L10n.string("取消"), role: .cancel) { categoryPendingDeletion = nil }
         } message: {
-            Text("只会删除本应用保存的组合，不会撤销已经设置的系统文件关联。")
+            Text(L10n.string("只会删除本应用保存的组合，不会撤销已经设置的系统文件关联。"))
         }
     }
 }
@@ -110,7 +110,7 @@ private struct DefaultAppCategoryCard: View {
                 HStack(spacing: 7) {
                     Text(category.title).font(.title3.weight(.semibold))
                     if category.isCustom {
-                        Text("自定义")
+                        Text(L10n.string("自定义"))
                             .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                             .padding(.horizontal, 5).padding(.vertical, 2)
                             .background(.secondary.opacity(0.12), in: Capsule())
@@ -121,15 +121,15 @@ private struct DefaultAppCategoryCard: View {
             }
             Spacer(minLength: 12)
             VStack(alignment: .trailing, spacing: 8) {
-                Button("更改…", action: changeAction).buttonStyle(.bordered)
+                Button(L10n.string("更改…"), action: changeAction).buttonStyle(.bordered)
                 Menu {
                     if category.isCustom {
-                        Button("编辑组合…", action: editAction)
+                        Button(L10n.string("编辑组合…"), action: editAction)
                     }
-                    Button("复制为自定义组合…", action: duplicateAction)
+                    Button(L10n.string("复制为自定义组合…"), action: duplicateAction)
                     if category.isCustom {
                         Divider()
-                        Button("删除组合…", role: .destructive, action: deleteAction)
+                        Button(L10n.string("删除组合…"), role: .destructive, action: deleteAction)
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -154,7 +154,7 @@ private struct DefaultAppCategoryCard: View {
                 Text(app.name)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text("当前默认")
+                Text(L10n.string("当前默认"))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -163,7 +163,7 @@ private struct DefaultAppCategoryCard: View {
             .font(.body.weight(.medium))
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                Label("尚未统一", systemImage: "exclamationmark.circle")
+                Label(L10n.string("尚未统一"), systemImage: "exclamationmark.circle")
                     .font(.body.weight(.medium)).foregroundStyle(.orange)
                 ForEach(status.assignments.prefix(2)) { assignment in
                     Text(L10n.format(
@@ -240,7 +240,7 @@ private struct DefaultAppCategoryEditorSheet: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(LanguageSettings.shared.string(editingID == nil ? "新建自定义组合" : "编辑自定义组合"))
                         .font(.title2.weight(.semibold))
-                    Text("把一组文件扩展名统一设置为同一个默认 App")
+                    Text(L10n.string("把一组文件扩展名统一设置为同一个默认 App"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -249,17 +249,19 @@ private struct DefaultAppCategoryEditorSheet: View {
             Divider()
 
             Form {
-                TextField("组合名称", text: $title, prompt: Text("例如：代码文件"))
-                TextField("说明", text: $subtitle, prompt: Text("例如：常用源码与配置文件"))
-                Picker("图标", selection: $symbol) {
+                TextField(L10n.string("组合名称"), text: $title,
+                          prompt: Text(L10n.string("例如：代码文件")))
+                TextField(L10n.string("说明"), text: $subtitle,
+                          prompt: Text(L10n.string("例如：常用源码与配置文件")))
+                Picker(L10n.string("图标"), selection: $symbol) {
                     ForEach(Self.symbols, id: \.self) { name in
                         Label(name, systemImage: name).tag(name)
                     }
                 }
-                TextField("扩展名", text: $extensionText,
-                          prompt: Text("例如：swift, js, ts, py, json"), axis: .vertical)
+                TextField(L10n.string("扩展名"), text: $extensionText,
+                          prompt: Text(L10n.string("例如：swift, js, ts, py, json")), axis: .vertical)
                     .lineLimit(3...6)
-                Text("可用逗号、空格或换行分隔；句点会自动移除，重复项会自动合并。")
+                Text(L10n.string("可用逗号、空格或换行分隔；句点会自动移除，重复项会自动合并。"))
                     .font(.caption).foregroundStyle(.secondary)
                 if !normalizedExtensions.isEmpty {
                     ScrollView(.horizontal) {
@@ -287,7 +289,7 @@ private struct DefaultAppCategoryEditorSheet: View {
                     Button {
                         choosingFileTypes = true
                     } label: {
-                        Label("从所有类型选择…", systemImage: "checklist")
+                        Label(L10n.string("从所有类型选择…"), systemImage: "checklist")
                     }
                     Spacer()
                     Text(L10n.format("status.extensionCount", normalizedExtensions.count))
@@ -298,11 +300,11 @@ private struct DefaultAppCategoryEditorSheet: View {
 
             Divider()
             HStack {
-                Text("保存组合不会立即修改任何系统文件关联。")
+                Text(L10n.string("保存组合不会立即修改任何系统文件关联。"))
                     .font(.callout).foregroundStyle(.secondary)
                 Spacer()
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("保存") {
+                Button(L10n.string("取消")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L10n.string("保存")) {
                     if onSave(editingID, title, subtitle, symbol, normalizedExtensions) {
                         dismiss()
                     }
@@ -368,14 +370,14 @@ private struct DefaultAppFileTypeSelectionSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("选择文件类型").font(.title2.weight(.semibold))
-                    Text("勾选要加入自定义组合的扩展名")
+                    Text(L10n.string("选择文件类型")).font(.title2.weight(.semibold))
+                    Text(L10n.string("勾选要加入自定义组合的扩展名"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Picker("显示范围", selection: $showsAllTypes) {
-                    Text("常用类型").tag(false)
-                    Text("所有类型").tag(true)
+                Picker(L10n.string("显示范围"), selection: $showsAllTypes) {
+                    Text(L10n.string("常用类型")).tag(false)
+                    Text(L10n.string("所有类型")).tag(true)
                 }
                 .labelsHidden().pickerStyle(.segmented).frame(width: 180)
                 SearchBox(prompt: "搜索扩展名、类型或 UTType", text: $searchText)
@@ -394,11 +396,11 @@ private struct DefaultAppFileTypeSelectionSheet: View {
                     }
                 }
                 .disabled(rows.isEmpty)
-                Button("清除选择") { selected.removeAll() }.disabled(selected.isEmpty)
+                Button(L10n.string("清除选择")) { selected.removeAll() }.disabled(selected.isEmpty)
                 Spacer()
                 if store.isLoadingFileTypes {
                     ProgressView().controlSize(.small)
-                    Text("正在载入所有类型…").foregroundStyle(.secondary)
+                    Text(L10n.string("正在载入所有类型…")).foregroundStyle(.secondary)
                 } else {
                     Text(L10n.format("status.resultCount", rows.count)).foregroundStyle(.secondary)
                 }
@@ -408,10 +410,14 @@ private struct DefaultAppFileTypeSelectionSheet: View {
             Divider()
 
             if rows.isEmpty && store.isLoadingFileTypes {
-                ProgressView("正在扫描系统声明的文件类型…")
+                ProgressView(L10n.string("正在扫描系统声明的文件类型…"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if rows.isEmpty {
-                ContentUnavailableView.search(text: searchText)
+                ContentUnavailableView(
+                    L10n.format("search.noResults", searchText),
+                    systemImage: "magnifyingglass",
+                    description: Text(L10n.string("请尝试其他搜索关键词。"))
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(rows) { type in
@@ -446,8 +452,8 @@ private struct DefaultAppFileTypeSelectionSheet: View {
                 Text(L10n.format("status.selectedCount", selected.count))
                     .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                 Spacer()
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("使用所选类型") { onDone(selected) }
+                Button(L10n.string("取消")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L10n.string("使用所选类型")) { onDone(selected) }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(selected.isEmpty)
@@ -509,12 +515,12 @@ private struct DefaultAppPickerSheet: View {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text("当前状态：").foregroundStyle(.secondary)
+                    Text(L10n.string("当前状态：")).foregroundStyle(.secondary)
                     if let app = currentStatus.unifiedApplication {
                         AppIcon(url: app.url, size: 20)
                         Text(app.name).fontWeight(.medium)
                     } else {
-                        Text("尚未统一").fontWeight(.medium).foregroundStyle(.orange)
+                        Text(L10n.string("尚未统一")).fontWeight(.medium).foregroundStyle(.orange)
                     }
                     Spacer()
                 }
@@ -551,8 +557,8 @@ private struct DefaultAppPickerSheet: View {
 
             Divider()
             if candidates.isEmpty {
-                ContentUnavailableView("没有找到可用的应用", systemImage: "app.badge.checkmark",
-                                       description: Text("系统没有注册能够处理这些类型的应用。"))
+                ContentUnavailableView(L10n.string("没有找到可用的应用"), systemImage: "app.badge.checkmark",
+                                       description: Text(L10n.string("系统没有注册能够处理这些类型的应用。")))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(candidates) { candidate in
@@ -578,7 +584,7 @@ private struct DefaultAppPickerSheet: View {
                             Spacer()
                             VStack(alignment: .trailing, spacing: 4) {
                                 if candidate.isCurrentDefault {
-                                    Label("当前默认", systemImage: "checkmark.circle.fill")
+                                    Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
                                         .font(.callout.weight(.medium)).foregroundStyle(.green)
                                 }
                                 Text(L10n.format("status.supportedFraction", candidate.supportedCount, candidate.totalCount))
@@ -610,7 +616,7 @@ private struct DefaultAppPickerSheet: View {
                             .font(.callout).foregroundStyle(.orange).lineLimit(2)
                     }
                 } else {
-                    Text("请先选择一个应用。点击应用不会立即修改系统设置。")
+                    Text(L10n.string("请先选择一个应用。点击应用不会立即修改系统设置。"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 if let resultMessage {
@@ -623,17 +629,17 @@ private struct DefaultAppPickerSheet: View {
                     Button {
                         chooseOtherApplication()
                     } label: {
-                        Label("选择其他 App…", systemImage: "folder")
+                        Label(L10n.string("选择其他 App…"), systemImage: "folder")
                     }
                     .disabled(isApplying)
                     Spacer()
-                    Button("取消") { dismiss() }.keyboardShortcut(.cancelAction).disabled(isApplying)
+                    Button(L10n.string("取消")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(isApplying)
                     Button {
                         applySelection()
                     } label: {
                         if isApplying {
                             ProgressView().controlSize(.small)
-                            Text("正在设置…")
+                            Text(L10n.string("正在设置…"))
                         } else {
                             Text(L10n.format("action.setAsCategory", category.title))
                         }
@@ -647,11 +653,11 @@ private struct DefaultAppPickerSheet: View {
         .frame(width: 620, height: 680)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
         .onAppear { reloadCandidates() }
-        .alert("无法使用所选 App", isPresented: Binding(
+        .alert(L10n.string("无法使用所选 App"), isPresented: Binding(
             get: { validationMessage != nil },
             set: { if !$0 { validationMessage = nil } }
         )) {
-            Button("好", role: .cancel) {}
+            Button(L10n.string("好"), role: .cancel) {}
         } message: {
             Text(validationMessage ?? "")
         }

@@ -26,13 +26,13 @@ struct ApplicationsView: View {
             header
             Divider().opacity(0.45)
             if store.isScanning && store.applications.isEmpty {
-                ProgressView("正在扫描应用程序及其文档类型…")
+                ProgressView(L10n.string("正在扫描应用程序及其文档类型…"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.applications.isEmpty {
                 VStack(spacing: 14) {
-                    ContentUnavailableView("尚未扫描应用程序", systemImage: "square.grid.2x2",
-                                           description: Text("扫描应用 Bundle 中声明的文档类型与 UTType。"))
-                    Button("开始扫描") { Task { await store.scanApplications() } }
+                    ContentUnavailableView(L10n.string("尚未扫描应用程序"), systemImage: "square.grid.2x2",
+                                           description: Text(L10n.string("扫描应用 Bundle 中声明的文档类型与 UTType。")))
+                    Button(L10n.string("开始扫描")) { Task { await store.scanApplications() } }
                         .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,8 +55,8 @@ struct ApplicationsView: View {
                         ApplicationDetailView(application: app)
                             .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        ContentUnavailableView("选择一个应用程序", systemImage: "app",
-                                               description: Text("查看它支持的文件类型并修改默认关联。"))
+                        ContentUnavailableView(L10n.string("选择一个应用程序"), systemImage: "app",
+                                               description: Text(L10n.string("查看它支持的文件类型并修改默认关联。")))
                             .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
@@ -68,12 +68,12 @@ struct ApplicationsView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text("应用程序").font(.title2.weight(.semibold))
-                Text("按名称或支持的文件类型筛选已安装的应用").font(.callout).foregroundStyle(.secondary)
+                Text(L10n.string("应用程序")).font(.title2.weight(.semibold))
+                Text(L10n.string("按名称或支持的文件类型筛选已安装的应用")).font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
             SearchBox(prompt: "搜索应用或文件类型", text: $searchText)
-                .help("可按应用名称、Bundle Identifier、扩展名或文件类型筛选。")
+                .help(L10n.string("可按应用名称、Bundle Identifier、扩展名或文件类型筛选。"))
             Button { Task { await store.scanApplications() } } label: {
                 Label(
                     LanguageSettings.shared.string(store.isScanning ? "正在扫描…" : "重新扫描"),
@@ -133,7 +133,7 @@ private struct ApplicationDetailView: View {
                 }
                 Spacer()
                 if !selected.isEmpty {
-                    Button("将所选类型设为默认") { makeSelectedDefault() }.buttonStyle(.borderedProminent)
+                    Button(L10n.string("将所选类型设为默认")) { makeSelectedDefault() }.buttonStyle(.borderedProminent)
                 }
             }.padding(20)
             Divider().opacity(0.45)
@@ -143,8 +143,8 @@ private struct ApplicationDetailView: View {
             get: { pendingDefaultChange != nil },
             set: { if !$0 { pendingDefaultChange = nil } }
         ), titleVisibility: .visible) {
-            Button("继续设置") { applyPendingDefaultChange() }
-            Button("取消", role: .cancel) { pendingDefaultChange = nil }
+            Button(L10n.string("继续设置")) { applyPendingDefaultChange() }
+            Button(L10n.string("取消"), role: .cancel) { pendingDefaultChange = nil }
         } message: {
             Text(confirmationMessage)
         }
@@ -195,7 +195,7 @@ private struct ApplicationDetailView: View {
                                     }
                                 }
                                 .frame(width: defaultAppWidth, alignment: .leading)
-                                Button("设为默认") { makeDefault(row.type) }
+                                Button(L10n.string("设为默认")) { makeDefault(row.type) }
                                     .buttonStyle(.borderless)
                                     .disabled(row.isApplicationDefault)
                                     .frame(width: actionWidth)

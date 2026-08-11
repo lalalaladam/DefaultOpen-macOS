@@ -92,6 +92,14 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
+    var displayNameKey: String {
+        switch self {
+        case .system: "跟随系统"
+        case .simplifiedChinese: "简体中文"
+        case .english: "English"
+        }
+    }
+
     var locale: Locale {
         switch self {
         case .system: .autoupdatingCurrent

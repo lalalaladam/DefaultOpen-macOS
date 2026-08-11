@@ -51,7 +51,7 @@ struct FileTypesView: View {
         .sheet(isPresented: $managingCustomExtensions) {
             CustomExtensionsSheet().environmentObject(store)
         }
-        .confirmationDialog("删除自定义扩展名？", isPresented: Binding(
+        .confirmationDialog(L10n.string("删除自定义扩展名？"), isPresented: Binding(
             get: { typePendingDeletion != nil },
             set: { if !$0 { typePendingDeletion = nil } }
         ), titleVisibility: .visible) {
@@ -61,14 +61,14 @@ struct FileTypesView: View {
                     typePendingDeletion = nil
                 }
             }
-            Button("取消", role: .cancel) { typePendingDeletion = nil }
+            Button(L10n.string("取消"), role: .cancel) { typePendingDeletion = nil }
         } message: {
-            Text("只会移除本应用保存的自定义记录，不会删除任何文件或系统类型。")
+            Text(L10n.string("只会移除本应用保存的自定义记录，不会删除任何文件或系统类型。"))
         }
-        .alert("添加文件扩展名", isPresented: $addingExtension) {
-            TextField("例如：webp", text: $newExtension)
-            Button("取消", role: .cancel) { newExtension = "" }
-            Button("添加") {
+        .alert(L10n.string("添加文件扩展名"), isPresented: $addingExtension) {
+            TextField(L10n.string("例如：webp"), text: $newExtension)
+            Button(L10n.string("取消"), role: .cancel) { newExtension = "" }
+            Button(L10n.string("添加")) {
                 let normalized = newExtension.trimmingCharacters(in: CharacterSet(charactersIn: " .")).lowercased()
                 if store.addExtension(newExtension) {
                     showsAllTypes = true
@@ -82,7 +82,7 @@ struct FileTypesView: View {
                     }
                 }
             }
-        } message: { Text("输入扩展名，不需要包含句点。") }
+        } message: { Text(L10n.string("输入扩展名，不需要包含句点。")) }
     }
 
     private var fileTypeList: some View {
@@ -120,7 +120,7 @@ struct FileTypesView: View {
                                     HStack(spacing: 6) {
                                         Text(row.type.displayName).lineLimit(1).truncationMode(.tail)
                                         if store.isCustomFileType(row.type) {
-                                            Text("自定义")
+                                            Text(L10n.string("自定义"))
                                                 .font(.caption2.weight(.medium))
                                                 .foregroundStyle(.secondary)
                                                 .padding(.horizontal, 5).padding(.vertical, 2)
@@ -134,7 +134,7 @@ struct FileTypesView: View {
                                 .help("\(row.type.displayName)\n\(row.type.contentTypeIdentifier)")
                                 DefaultAppLabel(application: row.defaultApplication)
                                     .frame(width: defaultAppWidth, alignment: .leading)
-                                Button("更改…") { presentedType = row.type }
+                                Button(L10n.string("更改…")) { presentedType = row.type }
                                     .buttonStyle(.bordered)
                                     .controlSize(.regular)
                                     .frame(width: actionWidth)
@@ -144,7 +144,7 @@ struct FileTypesView: View {
                             .id(row.id)
                             .contextMenu {
                                 if store.isCustomFileType(row.type) {
-                                    Button("删除自定义扩展名…", role: .destructive) {
+                                    Button(L10n.string("删除自定义扩展名…"), role: .destructive) {
                                         typePendingDeletion = row.type
                                     }
                                 }
@@ -166,13 +166,13 @@ struct FileTypesView: View {
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("文件类型").font(.title2.weight(.semibold))
-                Text("查看和更改文件的默认打开方式").font(.callout).foregroundStyle(.secondary)
+                Text(L10n.string("文件类型")).font(.title2.weight(.semibold))
+                Text(L10n.string("查看和更改文件的默认打开方式")).font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            Picker("显示范围", selection: $showsAllTypes) {
-                Text("常用类型").tag(false)
-                Text("全部类型").tag(true)
+            Picker(L10n.string("显示范围"), selection: $showsAllTypes) {
+                Text(L10n.string("常用类型")).tag(false)
+                Text(L10n.string("全部类型")).tag(true)
             }
             .labelsHidden()
             .pickerStyle(.segmented)
@@ -188,18 +188,18 @@ struct FileTypesView: View {
                 .controlSize(.small)
                 .opacity(store.isLoadingFileTypes ? 1 : 0)
                 .accessibilityHidden(!store.isLoadingFileTypes)
-                .help("正在载入全部类型…")
+                .help(L10n.string("正在载入全部类型…"))
             .frame(width: 16, height: 16)
             SearchBox(prompt: "搜索扩展名或文件类型", text: $searchText)
-            Button { addingExtension = true } label: { Label("添加扩展名", systemImage: "plus") }
+            Button { addingExtension = true } label: { Label(L10n.string("添加扩展名"), systemImage: "plus") }
                 .buttonStyle(.bordered)
             Menu {
-                Button("管理自定义扩展名…") { managingCustomExtensions = true }
+                Button(L10n.string("管理自定义扩展名…")) { managingCustomExtensions = true }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
-            .help("管理自定义扩展名")
+            .help(L10n.string("管理自定义扩展名"))
         }
         .padding(.horizontal, 22).padding(.vertical, 16)
     }
@@ -250,8 +250,8 @@ private struct CustomExtensionsSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("管理自定义扩展名").font(.title2.weight(.semibold))
-                    Text("管理为补充系统扫描结果而手动添加的文件类型")
+                    Text(L10n.string("管理自定义扩展名")).font(.title2.weight(.semibold))
+                    Text(L10n.string("管理为补充系统扫描结果而手动添加的文件类型"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -261,11 +261,15 @@ private struct CustomExtensionsSheet: View {
             .padding(20)
             Divider()
             if store.customFileTypes.isEmpty {
-                ContentUnavailableView("没有自定义扩展名", systemImage: "doc.badge.plus",
-                                       description: Text("手动添加的扩展名会显示在这里。"))
+                ContentUnavailableView(L10n.string("没有自定义扩展名"), systemImage: "doc.badge.plus",
+                                       description: Text(L10n.string("手动添加的扩展名会显示在这里。")))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if types.isEmpty {
-                ContentUnavailableView.search(text: searchText)
+                ContentUnavailableView(
+                    L10n.format("search.noResults", searchText),
+                    systemImage: "magnifyingglass",
+                    description: Text(L10n.string("请尝试其他搜索关键词。"))
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(types) { type in
@@ -292,16 +296,16 @@ private struct CustomExtensionsSheet: View {
             }
             Divider()
             HStack {
-                Text("删除只会移除本应用保存的记录。")
+                Text(L10n.string("删除只会移除本应用保存的记录。"))
                     .font(.callout).foregroundStyle(.secondary)
                 Spacer()
-                Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button(L10n.string("完成")) { dismiss() }.keyboardShortcut(.defaultAction)
             }
             .padding(16)
         }
         .frame(width: 680, height: 480)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
-        .confirmationDialog("删除自定义扩展名？", isPresented: Binding(
+        .confirmationDialog(L10n.string("删除自定义扩展名？"), isPresented: Binding(
             get: { typePendingDeletion != nil },
             set: { if !$0 { typePendingDeletion = nil } }
         ), titleVisibility: .visible) {
@@ -311,9 +315,9 @@ private struct CustomExtensionsSheet: View {
                     typePendingDeletion = nil
                 }
             }
-            Button("取消", role: .cancel) { typePendingDeletion = nil }
+            Button(L10n.string("取消"), role: .cancel) { typePendingDeletion = nil }
         } message: {
-            Text("不会删除任何文件，也不会修改系统的文件类型数据库。")
+            Text(L10n.string("不会删除任何文件，也不会修改系统的文件类型数据库。"))
         }
     }
 }
@@ -357,14 +361,14 @@ private struct ApplicationPickerSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(L10n.format("picker.openWithTitle", type.dottedExtension))
                         .font(.title2.weight(.semibold))
-                    Text("先选择一个 App，再确认设为默认").foregroundStyle(.secondary)
+                    Text(L10n.string("先选择一个 App，再确认设为默认")).foregroundStyle(.secondary)
                 }
                 Spacer()
             }.padding(20)
             Divider()
             if applications.isEmpty {
-                ContentUnavailableView("未找到可用的应用", systemImage: "app.badge.checkmark",
-                                       description: Text("Launch Services 没有注册可打开此文件类型的应用。"))
+                ContentUnavailableView(L10n.string("未找到可用的应用"), systemImage: "app.badge.checkmark",
+                                       description: Text(L10n.string("Launch Services 没有注册可打开此文件类型的应用。")))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(applications) { app in
@@ -383,7 +387,7 @@ private struct ApplicationPickerSheet: View {
                             }
                             Spacer()
                             if store.defaultApplication(for: type)?.bundleIdentifier == app.bundleIdentifier {
-                                Label("当前默认", systemImage: "checkmark.circle.fill")
+                                Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
                                     .font(.callout.weight(.medium)).foregroundStyle(.green)
                             }
                         }.padding(.vertical, 3)
@@ -399,18 +403,18 @@ private struct ApplicationPickerSheet: View {
                     Text(L10n.format("picker.extensionExplanation", type.dottedExtension))
                         .font(.callout).foregroundStyle(.secondary)
                 } else {
-                    Text("请先选择一个 App。点击应用不会立即修改系统设置。")
+                    Text(L10n.string("请先选择一个 App。点击应用不会立即修改系统设置。"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 HStack {
                     Button {
                         chooseOtherApplication()
                     } label: {
-                        Label("选择其他 App…", systemImage: "folder")
+                        Label(L10n.string("选择其他 App…"), systemImage: "folder")
                     }
                     .disabled(isApplying)
                     Spacer()
-                    Button("取消") { dismiss() }
+                    Button(L10n.string("取消")) { dismiss() }
                         .keyboardShortcut(.cancelAction)
                         .disabled(isApplying)
                     Button {
@@ -418,9 +422,9 @@ private struct ApplicationPickerSheet: View {
                     } label: {
                         if isApplying {
                             ProgressView().controlSize(.small)
-                            Text("正在设置…")
+                            Text(L10n.string("正在设置…"))
                         } else {
-                            Text("设为默认")
+                            Text(L10n.string("设为默认"))
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -432,11 +436,11 @@ private struct ApplicationPickerSheet: View {
         .frame(width: 580, height: 620)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
         .onAppear { applications = store.capableApplications(for: type) }
-        .alert("无法使用所选 App", isPresented: Binding(
+        .alert(L10n.string("无法使用所选 App"), isPresented: Binding(
             get: { validationMessage != nil },
             set: { if !$0 { validationMessage = nil } }
         )) {
-            Button("好", role: .cancel) {}
+            Button(L10n.string("好"), role: .cancel) {}
         } message: {
             Text(validationMessage ?? "")
         }

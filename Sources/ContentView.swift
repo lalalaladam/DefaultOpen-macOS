@@ -36,10 +36,10 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: LanguageSettings.showSettingsNotification)) { _ in
             showsSettings = true
         }
-        .alert("无法完成操作", isPresented: Binding(
+        .alert(L10n.string("无法完成操作"), isPresented: Binding(
             get: { store.errorMessage != nil },
             set: { if !$0 { store.errorMessage = nil } }
-        )) { Button("好", role: .cancel) {} } message: { Text(store.errorMessage ?? "") }
+        )) { Button(L10n.string("好"), role: .cancel) {} } message: { Text(store.errorMessage ?? "") }
         .overlay(alignment: .bottom) {
             if let message = store.successMessage {
                 Text(message)
@@ -89,7 +89,7 @@ private struct SidebarView: View {
             Button(action: settingsAction) {
                 HStack(spacing: 10) {
                     SidebarSymbol(name: "gearshape")
-                    Text("设置")
+                    Text(L10n.string("设置"))
                         .font(.body.weight(.medium))
                     Spacer(minLength: 0)
                 }
@@ -109,13 +109,15 @@ private struct SidebarView: View {
 private struct LanguageSettingsView: View {
     @EnvironmentObject private var languageSettings: LanguageSettings
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedLanguage: AppLanguage = .system
+    @State private var pendingLanguage: AppLanguage?
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("设置").font(.title2.weight(.semibold))
-                    Text("选择 DefaultOpen 使用的界面语言")
+                    Text(L10n.string("设置")).font(.title2.weight(.semibold))
+                    Text(L10n.string("选择 DefaultOpen 使用的界面语言"))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -123,24 +125,56 @@ private struct LanguageSettingsView: View {
             .padding(20)
             Divider()
             Form {
-                Picker("语言", selection: $languageSettings.language) {
-                    Text("跟随系统").tag(AppLanguage.system)
-                    Text("简体中文").tag(AppLanguage.simplifiedChinese)
-                    Text("English").tag(AppLanguage.english)
+                Picker(L10n.string("语言"), selection: $selectedLanguage) {
+                    Text(L10n.string("跟随系统")).tag(AppLanguage.system)
+                    Text(L10n.string("简体中文")).tag(AppLanguage.simplifiedChinese)
+                    Text(L10n.string("English")).tag(AppLanguage.english)
                 }
-                Text("切换会立即应用；系统提供的应用名称和文件类型名称仍可能跟随 macOS 语言。")
+                .onChange(of: selectedLanguage) { _, newLanguage in
+                    guard newLanguage != languageSettings.language else { return }
+                    pendingLanguage = newLanguage
+                }
+                Text(L10n.string("选择后需要确认；系统提供的应用名称和文件类型名称仍可能跟随 macOS 语言。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             .formStyle(.grouped)
             Divider()
             HStack {
                 Spacer()
-                Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button(L10n.string("完成")) { dismiss() }.keyboardShortcut(.defaultAction)
             }
             .padding(16)
         }
         .frame(width: 520, height: 300)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
+        .onAppear { selectedLanguage = languageSettings.language }
+        .alert(L10n.string("确认切换语言？"), isPresented: Binding(
+            get: { pendingLanguage != nil },
+            set: { if !$0 { cancelLanguageChange() } }
+        )) {
+            Button(L10n.string("取消"), role: .cancel) { cancelLanguageChange() }
+            Button(L10n.string("切换语言")) { applyLanguageChange() }
+        } message: {
+            Text(languageChangeMessage)
+        }
+    }
+
+    private var languageChangeMessage: String {
+        guard let pendingLanguage else { return "" }
+        let name = L10n.string(pendingLanguage.displayNameKey, language: languageSettings.language)
+        return L10n.format("language.confirmationMessage", name)
+    }
+
+    private func cancelLanguageChange() {
+        pendingLanguage = nil
+        selectedLanguage = languageSettings.language
+    }
+
+    private func applyLanguageChange() {
+        guard let pendingLanguage else { return }
+        self.pendingLanguage = nil
+        languageSettings.language = pendingLanguage
+        selectedLanguage = pendingLanguage
     }
 }
 
