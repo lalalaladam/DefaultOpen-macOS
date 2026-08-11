@@ -18,7 +18,7 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
         setupMainMenu()
-        registerSpotlightKeywords()
+        removeLegacySpotlightItems()
         showMainWindow()
     }
 
@@ -29,28 +29,18 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    func application(_ application: NSApplication, continue userActivity: NSUserActivity,
-                     restorationHandler: @escaping ([NSUserActivityRestoring]) -> Void) -> Bool {
-        guard userActivity.activityType == CSSearchableItemActionType else { return false }
-        showMainWindow()
-        return true
-    }
-
-    private func registerSpotlightKeywords() {
-        let attributes = CSSearchableItemAttributeSet(contentType: .application)
-        attributes.title = "DefaultOpen"
-        attributes.displayName = languageSettings.string("DefaultOpen — 默认打开方式")
-        attributes.contentDescription = languageSettings.string("管理默认应用、默认打开方式和文件关联")
-        attributes.keywords = languageSettings.string("默认,默认打开,默认应用,文件关联,扩展名,打开方式")
-            .components(separatedBy: ",")
-        attributes.contentURL = Bundle.main.bundleURL
-        let item = CSSearchableItem(
-            uniqueIdentifier: "com.lalalaladam.DefaultOpen.application",
-            domainIdentifier: "com.lalalaladam.DefaultOpen",
-            attributeSet: attributes
-        )
-        item.expirationDate = .distantFuture
-        CSSearchableIndex.default().indexSearchableItems([item]) { _ in }
+    private func removeLegacySpotlightItems() {
+        CSSearchableIndex.default().deleteSearchableItems(withIdentifiers: [
+            "com.lalalaladam.DefaultOpen.application",
+            "com.lalalaladam.DefaultOpen.search-aliases.v2"
+        ]) { error in
+            if let error {
+                NSLog("DefaultOpen could not remove its two legacy Spotlight items: %@",
+                      error.localizedDescription)
+            } else {
+                NSLog("DefaultOpen removed its two legacy Spotlight items.")
+            }
+        }
     }
 
     private func setupMainMenu() {
@@ -244,7 +234,6 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func languageDidChange(_ notification: Notification) {
         setupMainMenu()
-        registerSpotlightKeywords()
         aboutWindowController?.rebuildContent()
     }
 }

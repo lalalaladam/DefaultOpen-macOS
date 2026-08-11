@@ -111,6 +111,7 @@ private struct LanguageSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedLanguage: AppLanguage = .system
     @State private var pendingLanguage: AppLanguage?
+    @State private var languagePromptTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -125,14 +126,15 @@ private struct LanguageSettingsView: View {
             .padding(20)
             Divider()
             Form {
-                Picker(L10n.string("语言"), selection: $selectedLanguage) {
+                Picker(L10n.string("语言"), selection: Binding(
+                    get: { selectedLanguage },
+                    set: { newLanguage in
+                        requestLanguageChange(newLanguage)
+                    }
+                )) {
                     Text(L10n.string("跟随系统")).tag(AppLanguage.system)
                     Text(L10n.string("简体中文")).tag(AppLanguage.simplifiedChinese)
                     Text(L10n.string("English")).tag(AppLanguage.english)
-                }
-                .onChange(of: selectedLanguage) { _, newLanguage in
-                    guard newLanguage != languageSettings.language else { return }
-                    pendingLanguage = newLanguage
                 }
                 Text(L10n.string("选择后需要确认；系统提供的应用名称和文件类型名称仍可能跟随 macOS 语言。"))
                     .font(.caption).foregroundStyle(.secondary)
@@ -148,6 +150,7 @@ private struct LanguageSettingsView: View {
         .frame(width: 520, height: 300)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
         .onAppear { selectedLanguage = languageSettings.language }
+        .onDisappear { languagePromptTask?.cancel() }
         .alert(L10n.string("确认切换语言？"), isPresented: Binding(
             get: { pendingLanguage != nil },
             set: { if !$0 { cancelLanguageChange() } }
@@ -165,13 +168,25 @@ private struct LanguageSettingsView: View {
         return L10n.format("language.confirmationMessage", name)
     }
 
+    private func requestLanguageChange(_ newLanguage: AppLanguage) {
+        languagePromptTask?.cancel()
+        guard newLanguage != languageSettings.language else { return }
+        languagePromptTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled, newLanguage != languageSettings.language else { return }
+            pendingLanguage = newLanguage
+        }
+    }
+
     private func cancelLanguageChange() {
+        languagePromptTask?.cancel()
         pendingLanguage = nil
         selectedLanguage = languageSettings.language
     }
 
     private func applyLanguageChange() {
         guard let pendingLanguage else { return }
+        languagePromptTask?.cancel()
         self.pendingLanguage = nil
         languageSettings.language = pendingLanguage
         selectedLanguage = pendingLanguage

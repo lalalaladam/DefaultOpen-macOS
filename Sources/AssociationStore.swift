@@ -121,12 +121,23 @@ final class AssociationStore: ObservableObject {
         defer { isLoadingFileTypes = false }
         let scanner = self.scanner
         let launchServices = self.launchServices
-        let discoveredTypes = await Task.detached(priority: .userInitiated) {
-            scanner.scanDeclaredFileTypes().flatMap { supportedType in
+        let result = await Task.detached(priority: .userInitiated) {
+            let discoveredTypes = scanner.scanDeclaredFileTypes().flatMap { supportedType in
                 supportedType.extensions.compactMap { try? launchServices.fileType(for: $0) }
             }
+            let uniqueTypes = Dictionary(
+                grouping: discoveredTypes,
+                by: \FileTypeInfo.contentTypeIdentifier
+            ).compactMap(\.value.first)
+            let defaults = Dictionary(uniqueKeysWithValues: uniqueTypes.compactMap { type in
+                launchServices.defaultApplication(for: type).map {
+                    (type.contentTypeIdentifier, $0)
+                }
+            })
+            return (discoveredTypes, defaults)
         }.value
-        mergeIntoFileTypeCatalog(discoveredTypes)
+        mergeIntoFileTypeCatalog(result.0)
+        defaultsByContentType.merge(result.1) { _, new in new }
         hasLoadedAllFileTypes = true
     }
 
