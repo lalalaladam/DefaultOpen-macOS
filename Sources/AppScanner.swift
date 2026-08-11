@@ -12,6 +12,19 @@ struct AppScanner: Sendable {
         return Dictionary(grouping: types, by: \SupportedType.id).compactMap(\.value.first)
     }
 
+    func applicationsCapable(of fileType: FileTypeInfo) -> [ApplicationInfo] {
+        let client = LaunchServicesClient()
+        let inferredType = SupportedType(
+            contentTypeIdentifier: fileType.contentTypeIdentifier,
+            extensions: [fileType.extensionName],
+            displayName: fileType.displayName
+        )
+        return client.capableApplicationURLs(forContentType: fileType.contentTypeIdentifier).compactMap { url in
+            guard let application = try? applicationInfo(at: url) else { return nil }
+            return merging(inferredType, into: application)
+        }
+    }
+
     private func scanApplicationBundles() -> [ApplicationInfo] {
         let roots = [
             URL(fileURLWithPath: "/Applications"),
@@ -58,6 +71,9 @@ struct AppScanner: Sendable {
     /// document type block we can parse while still being registered as a PDF handler).
     private func augmentWithLaunchServices(_ applications: [ApplicationInfo], managedTypes: [FileTypeInfo]) -> [ApplicationInfo] {
         let client = LaunchServicesClient()
+        var discoveredApplications = Dictionary(
+            uniqueKeysWithValues: applications.map { ($0.bundleIdentifier, $0) }
+        )
         var knownTypes: [String: SupportedType] = [:]
         for type in managedTypes {
             knownTypes[type.contentTypeIdentifier] = SupportedType(
@@ -69,12 +85,17 @@ struct AppScanner: Sendable {
 
         var inferred: [String: [SupportedType]] = [:]
         for type in knownTypes.values {
-            for bundleID in client.capableBundleIdentifiers(forContentType: type.contentTypeIdentifier) {
+            for url in client.capableApplicationURLs(forContentType: type.contentTypeIdentifier) {
+                guard let application = try? applicationInfo(at: url) else { continue }
+                let bundleID = application.bundleIdentifier
                 inferred[bundleID, default: []].append(type)
+                if discoveredApplications[bundleID] == nil {
+                    discoveredApplications[bundleID] = application
+                }
             }
         }
 
-        return applications.map { app in
+        return discoveredApplications.values.map { app in
             var merged: [String: SupportedType] = [:]
             for type in app.supportedTypes + (inferred[app.bundleIdentifier] ?? []) {
                 if let previous = merged[type.contentTypeIdentifier] {
@@ -137,16 +158,19 @@ struct AppScanner: Sendable {
         }
 
         for document in (info["CFBundleDocumentTypes"] as? [[String: Any]]) ?? [] {
+            guard isUsableDocumentType(document) else { continue }
             let identifiers = stringArray(document["LSItemContentTypes"])
             let legacyExtensions = stringArray(document["CFBundleTypeExtensions"])
             let declaredName = document["CFBundleTypeName"] as? String
 
             for identifier in identifiers {
                 let type = UTType(identifier)
-                let extensions = (declaredExtensions[identifier] ?? []) + preferredExtensions(for: type)
+                let extensions = (declaredExtensions[identifier] ?? [])
+                    + preferredExtensions(for: type)
+                    + legacyExtensions
                 result.append(SupportedType(
                     contentTypeIdentifier: identifier,
-                    extensions: normalize(extensions.isEmpty ? legacyExtensions : extensions),
+                    extensions: normalize(extensions),
                     displayName: declaredName ?? type?.localizedDescription ?? identifier
                 ))
             }
@@ -168,6 +192,38 @@ struct AppScanner: Sendable {
                                  extensions: normalize(group.flatMap(\.extensions)),
                                  displayName: first.displayName)
         }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+
+    private func isUsableDocumentType(_ document: [String: Any]) -> Bool {
+        let role = (document["CFBundleTypeRole"] as? String)?.lowercased()
+        let rank = (document["LSHandlerRank"] as? String)?.lowercased()
+        return role != "none" && rank != "none"
+    }
+
+    private func merging(_ inferredType: SupportedType,
+                         into application: ApplicationInfo) -> ApplicationInfo {
+        var types = application.supportedTypes
+        if let index = types.firstIndex(where: {
+            $0.contentTypeIdentifier == inferredType.contentTypeIdentifier
+        }) {
+            let existing = types[index]
+            types[index] = SupportedType(
+                contentTypeIdentifier: existing.contentTypeIdentifier,
+                extensions: normalize(existing.extensions + inferredType.extensions),
+                displayName: existing.displayName
+            )
+        } else {
+            types.append(inferredType)
+        }
+        return ApplicationInfo(
+            bundleIdentifier: application.bundleIdentifier,
+            name: application.name,
+            url: application.url,
+            supportedTypes: types.sorted {
+                $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+            },
+            searchAliases: application.searchAliases
+        )
     }
 
     private func stringArray(_ value: Any?) -> [String] {

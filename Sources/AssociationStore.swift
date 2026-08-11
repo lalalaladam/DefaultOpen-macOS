@@ -21,6 +21,7 @@ final class AssociationStore: ObservableObject {
     private let customDefaultAppCategoriesKey = "customDefaultAppCategories"
     private let starterExtensions = ["pdf", "txt", "md", "jpg", "png", "heic", "svg", "zip", "json", "csv", "docx", "xlsx", "pptx", "html", "mp3", "mp4"]
     private var optimisticDefaultAppStatuses: [String: DefaultAppCategoryStatus] = [:]
+    private var queriedApplicationExtensions = Set<String>()
 
     init() {
         customDefaultAppCategories = Self.loadCustomDefaultAppCategories()
@@ -113,6 +114,29 @@ final class AssociationStore: ObservableObject {
         })
         defaultsByContentType.merge(result.1) { _, new in new }
         isScanning = false
+    }
+
+    func loadApplications(matchingExtensionSearch searchText: String) async {
+        let extensionName = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        guard !extensionName.isEmpty,
+              extensionName.count <= 32,
+              !extensionName.contains(where: { $0.isWhitespace || $0 == "." }),
+              !queriedApplicationExtensions.contains(extensionName),
+              let fileType = try? launchServices.fileType(for: extensionName) else { return }
+
+        queriedApplicationExtensions.insert(extensionName)
+        let scanner = self.scanner
+        let discovered = await Task.detached(priority: .userInitiated) {
+            scanner.applicationsCapable(of: fileType)
+        }.value
+        guard !discovered.isEmpty else { return }
+        mergeApplications(discovered)
+        mergeIntoFileTypeCatalog([fileType])
+        if let defaultApplication = launchServices.defaultApplication(for: fileType) {
+            defaultsByContentType[fileType.contentTypeIdentifier] = defaultApplication
+        }
     }
 
     func loadAllFileTypes() async {
@@ -522,6 +546,42 @@ final class AssociationStore: ObservableObject {
         allFileTypes = Dictionary(grouping: allFileTypes + types, by: \FileTypeInfo.id)
             .compactMap(\.value.first)
             .sorted { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
+    }
+
+    private func mergeApplications(_ discovered: [ApplicationInfo]) {
+        var merged = Dictionary(uniqueKeysWithValues: applications.map { ($0.bundleIdentifier, $0) })
+        for application in discovered {
+            guard let existing = merged[application.bundleIdentifier] else {
+                merged[application.bundleIdentifier] = application
+                continue
+            }
+            var types = Dictionary(
+                uniqueKeysWithValues: existing.supportedTypes.map { ($0.contentTypeIdentifier, $0) }
+            )
+            for type in application.supportedTypes {
+                if let previous = types[type.contentTypeIdentifier] {
+                    types[type.contentTypeIdentifier] = SupportedType(
+                        contentTypeIdentifier: previous.contentTypeIdentifier,
+                        extensions: (previous.extensions + type.extensions).uniqued().sorted(),
+                        displayName: previous.displayName
+                    )
+                } else {
+                    types[type.contentTypeIdentifier] = type
+                }
+            }
+            merged[application.bundleIdentifier] = ApplicationInfo(
+                bundleIdentifier: existing.bundleIdentifier,
+                name: existing.name,
+                url: existing.url,
+                supportedTypes: types.values.sorted {
+                    $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                },
+                searchAliases: (existing.searchAliases + application.searchAliases).uniqued()
+            )
+        }
+        applications = merged.values.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
     }
 
     private func resolvedFileTypes(for category: DefaultAppCategory,

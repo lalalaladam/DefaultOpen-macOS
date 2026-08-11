@@ -64,7 +64,13 @@ struct ApplicationsView: View {
                 }
             }
         }
-        .task { if store.applications.isEmpty { await store.scanApplications() } }
+        .task(id: searchText) {
+            if store.applications.isEmpty { await store.scanApplications() }
+            guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await store.loadApplications(matchingExtensionSearch: searchText)
+        }
     }
 
     private var header: some View {

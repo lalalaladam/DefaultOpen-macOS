@@ -29,7 +29,12 @@ struct LaunchServicesClient: Sendable {
         let ext = rawExtension.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "."))
             .lowercased()
-        guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else {
+        let declaredType = UTType.types(
+            tag: ext,
+            tagClass: .filenameExtension,
+            conformingTo: nil
+        ).first { !$0.isDynamic }
+        guard !ext.isEmpty, let type = declaredType ?? UTType(filenameExtension: ext) else {
             throw AssociationError.invalidExtension(rawExtension)
         }
         return FileTypeInfo(
@@ -47,17 +52,24 @@ struct LaunchServicesClient: Sendable {
     }
 
     func capableApplications(for type: FileTypeInfo) -> [ApplicationInfo] {
-        capableBundleIdentifiers(forContentType: type.contentTypeIdentifier).compactMap { bundleID in
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-                .map { lightweightApplication(bundleID: bundleID, url: $0) }
+        capableApplicationURLs(forContentType: type.contentTypeIdentifier).compactMap { url in
+            Bundle(url: url)?.bundleIdentifier.map {
+                lightweightApplication(bundleID: $0, url: url)
+            }
         }
         .uniqued(by: \ApplicationInfo.bundleIdentifier)
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     func capableBundleIdentifiers(forContentType identifier: String) -> [String] {
-        guard let unmanaged = LSCopyAllRoleHandlersForContentType(identifier as CFString, .all) else { return [] }
-        return unmanaged.takeRetainedValue() as? [String] ?? []
+        capableApplicationURLs(forContentType: identifier).compactMap {
+            Bundle(url: $0)?.bundleIdentifier
+        }.uniqued(by: \.self)
+    }
+
+    func capableApplicationURLs(forContentType identifier: String) -> [URL] {
+        guard let type = UTType(identifier) else { return [] }
+        return NSWorkspace.shared.urlsForApplications(toOpen: type)
     }
 
     func defaultApplication(forURLScheme scheme: String) -> ApplicationInfo? {

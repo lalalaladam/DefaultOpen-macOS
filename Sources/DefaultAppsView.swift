@@ -621,6 +621,9 @@ private struct DefaultAppPickerSheet: View {
                                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                             }
+                            .alignmentGuide(.listRowSeparatorLeading) { dimensions in
+                                dimensions[.leading]
+                            }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 4) {
                                 if candidate.isCurrentDefault {
@@ -632,6 +635,8 @@ private struct DefaultAppPickerSheet: View {
                             }
                         }
                         .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(isApplying)
