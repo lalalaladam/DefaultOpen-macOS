@@ -201,6 +201,8 @@
     "action.removeExtension" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"移除 .%@"}},"en":{"stringUnit":{"state":"translated","value":"Remove .%@"}}}},
     "status.extensionCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"已包含 %ld 个扩展名"}},"en":{"stringUnit":{"state":"translated","value":"Includes %ld extensions"}}}},
     "status.resultCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"找到 %ld 项"}},"en":{"stringUnit":{"state":"translated","value":"%ld results"}}}},
+    "search.matchingTypeCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"找到 %ld 个匹配类型"}},"en":{"stringUnit":{"state":"translated","value":"%ld matching types"}}}},
+    "search.bestExtensionMatch" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"最佳匹配：%@"}},"en":{"stringUnit":{"state":"translated","value":"Best match: %@"}}}},
     "status.selectedCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"已选择 %ld 项"}},"en":{"stringUnit":{"state":"translated","value":"%ld selected"}}}},
     "status.currentTargets" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"当前负责：%@"}},"en":{"stringUnit":{"state":"translated","value":"Currently handles: %@"}}}},
     "status.supportedFraction" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"支持 %ld/%ld"}},"en":{"stringUnit":{"state":"translated","value":"Supports %ld/%ld"}}}},

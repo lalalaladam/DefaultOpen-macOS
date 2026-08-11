@@ -473,20 +473,22 @@ final class AssociationStore: ObservableObject {
         return extensions.compactMap { try? launchServices.fileType(for: $0) }
     }
 
-    func matchingFileTypes(for searchText: String, includeAll: Bool) -> [FileTypeInfo] {
+    func matchingFileTypes(for searchText: String, includeAll: Bool) -> [FileTypeSearchResult] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let source = includeAll ? allFileTypes : fileTypes.filter { !isCustomFileType($0) }
-        guard !query.isEmpty else { return source }
+        guard !query.isEmpty else {
+            return source.map { FileTypeSearchResult(type: $0, rank: nil) }
+        }
 
         let extensionQuery = query.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        var matches = source.filter {
-            $0.extensionName.localizedCaseInsensitiveContains(extensionQuery)
-            || $0.displayName.localizedCaseInsensitiveContains(query)
-            || $0.contentTypeIdentifier.localizedCaseInsensitiveContains(query)
+        var matches = source.compactMap { type -> FileTypeSearchResult? in
+            guard let rank = FileTypeSearchRank.match(type: type, query: query,
+                                                      extensionQuery: extensionQuery) else { return nil }
+            return FileTypeSearchResult(type: type, rank: rank)
         }
         if let exactType = try? launchServices.fileType(for: extensionQuery),
-           !matches.contains(where: { $0.id == exactType.id }) {
-            matches.append(exactType)
+           !matches.contains(where: { $0.type.id == exactType.id }) {
+            matches.append(FileTypeSearchResult(type: exactType, rank: .extensionExact))
         }
         return matches
     }
@@ -656,6 +658,60 @@ final class AssociationStore: ObservableObject {
                 self.errorMessage = L10n.format("error.unifiedUpdateFailed", category.title)
             }
         }
+    }
+}
+
+struct FileTypeSearchResult {
+    let type: FileTypeInfo
+    let rank: FileTypeSearchRank?
+}
+
+enum FileTypeSearchRank: Int, Comparable {
+    case extensionExact
+    case extensionPrefix
+    case displayName
+    case contentTypeIdentifier
+
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+
+    static func match(type: FileTypeInfo, query: String,
+                      extensionQuery: String) -> FileTypeSearchRank? {
+        let normalizedExtension = folded(type.extensionName)
+        let normalizedExtensionQuery = folded(extensionQuery)
+        if !normalizedExtensionQuery.isEmpty {
+            if normalizedExtension == normalizedExtensionQuery { return .extensionExact }
+            if normalizedExtension.hasPrefix(normalizedExtensionQuery) { return .extensionPrefix }
+        }
+
+        let normalizedQuery = folded(query)
+        if matchesWords(normalizedQuery, in: folded(type.displayName)) { return .displayName }
+
+        let identifier = folded(type.contentTypeIdentifier)
+        if normalizedQuery.contains(".") {
+            if identifier == normalizedQuery || identifier.hasPrefix(normalizedQuery) {
+                return .contentTypeIdentifier
+            }
+        } else if identifierComponents(identifier).contains(where: { $0.hasPrefix(normalizedQuery) }) {
+            return .contentTypeIdentifier
+        }
+        return nil
+    }
+
+    private static func folded(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private static func matchesWords(_ query: String, in value: String) -> Bool {
+        guard !query.isEmpty else { return false }
+        if value == query || value.hasPrefix(query) { return true }
+        if query.unicodeScalars.contains(where: { !$0.isASCII }) { return value.contains(query) }
+        return value.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .contains(where: { !$0.isEmpty && $0.hasPrefix(query) })
+    }
+
+    private static func identifierComponents(_ identifier: String) -> [String] {
+        identifier.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
     }
 }
 

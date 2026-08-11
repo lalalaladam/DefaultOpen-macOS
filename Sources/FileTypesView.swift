@@ -14,28 +14,31 @@ struct FileTypesView: View {
     @State private var typePendingDeletion: FileTypeInfo?
 
     private var rows: [FileTypeRow] {
-        let types = store.matchingFileTypes(for: searchText, includeAll: showsAllTypes)
-        return types.map { type in
-            let app = store.defaultApplication(for: type)
-            return FileTypeRow(type: type, defaultApplication: app)
+        let matches = store.matchingFileTypes(for: searchText, includeAll: showsAllTypes)
+        return matches.map { match in
+            let app = store.defaultApplication(for: match.type)
+            return (row: FileTypeRow(type: match.type, defaultApplication: app), rank: match.rank)
         }.sorted { lhs, rhs in
-            let lhsIsUnset = lhs.defaultApplication == nil
-            let rhsIsUnset = rhs.defaultApplication == nil
+            if let lhsRank = lhs.rank, let rhsRank = rhs.rank, lhsRank != rhsRank {
+                return lhsRank < rhsRank
+            }
+            let lhsIsUnset = lhs.row.defaultApplication == nil
+            let rhsIsUnset = rhs.row.defaultApplication == nil
             if lhsIsUnset != rhsIsUnset { return !lhsIsUnset }
             let comparison: ComparisonResult
             switch sortColumn {
             case .extensionName:
-                comparison = lhs.extensionName.localizedStandardCompare(rhs.extensionName)
+                comparison = lhs.row.extensionName.localizedStandardCompare(rhs.row.extensionName)
             case .displayName:
-                comparison = lhs.displayName.localizedStandardCompare(rhs.displayName)
+                comparison = lhs.row.displayName.localizedStandardCompare(rhs.row.displayName)
             case .defaultAppName:
-                comparison = lhs.defaultAppName.localizedStandardCompare(rhs.defaultAppName)
+                comparison = lhs.row.defaultAppName.localizedStandardCompare(rhs.row.defaultAppName)
             }
             if comparison == .orderedSame {
-                return lhs.extensionName.localizedStandardCompare(rhs.extensionName) == .orderedAscending
+                return lhs.row.extensionName.localizedStandardCompare(rhs.row.extensionName) == .orderedAscending
             }
             return sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
-        }
+        }.map(\.row)
     }
 
     var body: some View {
@@ -96,12 +99,9 @@ struct FileTypesView: View {
 
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    sortableHeader("扩展名", column: .extensionName)
-                        .frame(width: extensionWidth, alignment: .leading)
-                    sortableHeader("文件类型", column: .displayName)
-                        .frame(width: typeWidth, alignment: .leading)
-                    sortableHeader("当前默认 App", column: .defaultAppName)
-                        .frame(width: defaultAppWidth, alignment: .leading)
+                    sortableHeader("扩展名", column: .extensionName, width: extensionWidth)
+                    sortableHeader("文件类型", column: .displayName, width: typeWidth)
+                    sortableHeader("当前默认 App", column: .defaultAppName, width: defaultAppWidth)
                     Color.clear.frame(width: actionWidth)
                 }
                 .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
@@ -206,7 +206,8 @@ struct FileTypesView: View {
         .padding(.horizontal, 22).padding(.vertical, 16)
     }
 
-    private func sortableHeader(_ title: String, column: FileTypeSortColumn) -> some View {
+    private func sortableHeader(_ title: String, column: FileTypeSortColumn,
+                                width: CGFloat) -> some View {
         Button {
             if sortColumn == column {
                 sortAscending.toggle()
@@ -221,7 +222,10 @@ struct FileTypesView: View {
                     Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
                         .font(.caption2.weight(.bold))
                 }
+                Spacer(minLength: 0)
             }
+            .frame(width: width, height: 34, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

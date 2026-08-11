@@ -53,7 +53,8 @@ struct ApplicationsView: View {
                         ApplicationDetailView(application: result.application,
                                               searchQuery: searchText,
                                               matchingTypeIDs: result.matchingTypeIDs,
-                                              bestMatchingTypeID: result.bestMatchingTypeID)
+                                              bestMatchingTypeID: result.bestMatchingTypeID,
+                                              matchingExtensions: result.matchingExtensions)
                             .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ContentUnavailableView(L10n.string("选择一个应用程序"), systemImage: "app",
@@ -94,6 +95,7 @@ private struct ApplicationDetailView: View {
     let searchQuery: String
     let matchingTypeIDs: Set<SupportedType.ID>
     let bestMatchingTypeID: SupportedType.ID?
+    let matchingExtensions: [SupportedType.ID: String]
     @State private var selected = Set<SupportedType.ID>()
     @State private var sortColumn: SupportedTypeSortColumn = .extensionName
     @State private var sortAscending = true
@@ -103,8 +105,13 @@ private struct ApplicationDetailView: View {
         application.supportedTypes.map { type in
             let current = currentDefault(for: type)
             return SupportedTypeRow(type: type, currentDefault: current,
-                                    isApplicationDefault: current?.bundleIdentifier == application.bundleIdentifier)
+                                    isApplicationDefault: current?.bundleIdentifier == application.bundleIdentifier,
+                                    matchingExtension: matchingExtensions[type.id])
         }.sorted { lhs, rhs in
+            let lhsMatchOrder = matchOrder(for: lhs.id)
+            let rhsMatchOrder = matchOrder(for: rhs.id)
+            if lhsMatchOrder != rhsMatchOrder { return lhsMatchOrder < rhsMatchOrder }
+
             let lhsIsUnset = lhs.currentDefault == nil
             let rhsIsUnset = rhs.currentDefault == nil
             if lhsIsUnset != rhsIsUnset { return !lhsIsUnset }
@@ -152,6 +159,10 @@ private struct ApplicationDetailView: View {
         } message: {
             Text(confirmationMessage)
         }
+        .onChange(of: application.id) { _, _ in
+            selected.removeAll()
+            pendingDefaultChange = nil
+        }
     }
 
     private var supportedTypesList: some View {
@@ -162,13 +173,22 @@ private struct ApplicationDetailView: View {
             let typeWidth = max(160, proxy.size.width - extensionWidth - defaultAppWidth - actionWidth - 72)
 
             VStack(spacing: 0) {
+                if !matchingTypeIDs.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                        Text(L10n.format("search.matchingTypeCount", matchingTypeIDs.count))
+                        Spacer()
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    Divider()
+                }
                 HStack(spacing: 12) {
-                    sortableHeader("扩展名", column: .extensionName)
-                        .frame(width: extensionWidth, alignment: .leading)
-                    sortableHeader("文件类型 / UTType", column: .typeName)
-                        .frame(width: typeWidth, alignment: .leading)
-                    sortableHeader("当前默认 App", column: .defaultAppName)
-                        .frame(width: defaultAppWidth, alignment: .leading)
+                    sortableHeader("扩展名", column: .extensionName, width: extensionWidth)
+                    sortableHeader("文件类型 / UTType", column: .typeName, width: typeWidth)
+                    sortableHeader("当前默认 App", column: .defaultAppName, width: defaultAppWidth)
                     Color.clear.frame(width: actionWidth)
                 }
                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -180,13 +200,20 @@ private struct ApplicationDetailView: View {
                         LazyVStack(spacing: 0) {
                             ForEach(rows) { row in
                             HStack(spacing: 12) {
-                                Text(row.extensionText)
-                                    .font(.system(.callout, design: .monospaced))
-                                    .lineLimit(1).truncationMode(.tail)
+                                extensionLabel(row)
                                     .frame(width: extensionWidth, alignment: .leading)
                                     .help(row.extensionText)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(row.type.displayName).lineLimit(1).truncationMode(.tail)
+                                    HStack(spacing: 6) {
+                                        Text(row.type.displayName).lineLimit(1).truncationMode(.tail)
+                                        if row.id == bestMatchingTypeID, let matched = row.matchingExtension {
+                                            Label(L10n.format("search.bestExtensionMatch", ".\(matched)"),
+                                                  systemImage: "magnifyingglass")
+                                                .font(.caption2.weight(.medium))
+                                                .foregroundStyle(.orange)
+                                                .lineLimit(1)
+                                        }
+                                    }
                                     Text(row.type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
                                         .lineLimit(1).truncationMode(.middle)
                                 }
@@ -232,9 +259,32 @@ private struct ApplicationDetailView: View {
 
     private func rowBackground(_ id: SupportedType.ID) -> Color {
         if selected.contains(id) { return Color.accentColor.opacity(0.18) }
-        if id == bestMatchingTypeID { return Color.orange.opacity(0.20) }
-        if matchingTypeIDs.contains(id) { return Color.orange.opacity(0.10) }
         return Color.clear
+    }
+
+    @ViewBuilder
+    private func extensionLabel(_ row: SupportedTypeRow) -> some View {
+        HStack(spacing: 4) {
+            if let matched = row.matchingExtension {
+                Text(".\(matched)")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.orange)
+                if !row.remainingExtensionText.isEmpty {
+                    Text(row.remainingExtensionText).foregroundStyle(.secondary)
+                }
+            } else {
+                Text(row.extensionText)
+            }
+        }
+        .font(.system(.callout, design: .monospaced))
+        .lineLimit(1)
+        .truncationMode(.tail)
+    }
+
+    private func matchOrder(for id: SupportedType.ID) -> Int {
+        if id == bestMatchingTypeID { return 0 }
+        if matchingTypeIDs.contains(id) { return 1 }
+        return 2
     }
 
     private func selectRow(_ id: SupportedType.ID) {
@@ -287,7 +337,8 @@ private struct ApplicationDetailView: View {
         Task { await store.setDefault(application, for: change.types) }
     }
 
-    private func sortableHeader(_ title: String, column: SupportedTypeSortColumn) -> some View {
+    private func sortableHeader(_ title: String, column: SupportedTypeSortColumn,
+                                width: CGFloat) -> some View {
         Button {
             if sortColumn == column {
                 sortAscending.toggle()
@@ -302,7 +353,10 @@ private struct ApplicationDetailView: View {
                     Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
                         .font(.caption2.weight(.bold))
                 }
+                Spacer(minLength: 0)
             }
+            .frame(width: width, height: 30, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -318,6 +372,7 @@ private struct ApplicationSearchResult: Identifiable {
     let rank: SearchRank
     let matchingTypeIDs: Set<SupportedType.ID>
     let bestMatchingTypeID: SupportedType.ID?
+    let matchingExtensions: [SupportedType.ID: String]
 
     var id: String { application.id }
 
@@ -327,38 +382,41 @@ private struct ApplicationSearchResult: Identifiable {
         rank = SearchRank(category: .bundleOrAlias, quality: .contains)
         matchingTypeIDs = []
         bestMatchingTypeID = nil
+        matchingExtensions = [:]
     }
 
     init?(application: ApplicationInfo, query: String) {
         let normalizedQuery = query.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
         let extensionQuery = normalizedQuery.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        var candidates: [(rank: SearchRank, subtitle: String, typeID: SupportedType.ID?)] = []
+        var candidates: [(rank: SearchRank, subtitle: String, typeID: SupportedType.ID?,
+                          matchedExtension: String?)] = []
 
         if let quality = MatchQuality.match(normalizedQuery, in: application.name) {
             candidates.append((SearchRank(category: .appName, quality: quality),
-                               L10n.format("名称包含“%@”", query), nil))
+                               L10n.format("名称包含“%@”", query), nil, nil))
         }
         for type in application.supportedTypes {
             for fileExtension in type.extensions {
-                if let quality = MatchQuality.match(extensionQuery, in: fileExtension) {
+                if let quality = MatchQuality.matchExtension(extensionQuery, in: fileExtension) {
                     candidates.append((SearchRank(category: .fileExtension, quality: quality),
-                                       L10n.format("支持打开 %@", ".\(fileExtension)"), type.id))
+                                       L10n.format("支持打开 %@", ".\(fileExtension)"), type.id,
+                                       fileExtension))
                 }
             }
             if normalizedQuery.contains("."),
                type.contentTypeIdentifier.folding(options: [.caseInsensitive, .diacriticInsensitive],
                                                    locale: .current) == normalizedQuery {
                 candidates.append((SearchRank(category: .utType, quality: .exact),
-                                   L10n.format("支持 UTType %@", type.contentTypeIdentifier), type.id))
+                                   L10n.format("支持 UTType %@", type.contentTypeIdentifier), type.id, nil))
             }
         }
         if let quality = MatchQuality.match(normalizedQuery, in: application.bundleIdentifier) {
             candidates.append((SearchRank(category: .bundleOrAlias, quality: quality),
-                               L10n.format("Bundle ID 包含“%@”", query), nil))
+                               L10n.format("Bundle ID 包含“%@”", query), nil, nil))
         }
         if application.searchAliases.contains(where: { MatchQuality.match(normalizedQuery, in: $0) != nil }) {
             candidates.append((SearchRank(category: .bundleOrAlias, quality: .contains),
-                               L10n.format("名称别名包含“%@”", query), nil))
+                               L10n.format("名称别名包含“%@”", query), nil, nil))
         }
 
         guard let best = candidates.min(by: { $0.rank < $1.rank }) else { return nil }
@@ -369,6 +427,10 @@ private struct ApplicationSearchResult: Identifiable {
         rank = best.rank
         matchingTypeIDs = Set(typeMatches.compactMap(\.typeID))
         bestMatchingTypeID = (exactExtension ?? typeMatches.first)?.typeID
+        matchingExtensions = Dictionary(typeMatches.compactMap { match in
+            guard let typeID = match.typeID, let fileExtension = match.matchedExtension else { return nil }
+            return (typeID, fileExtension)
+        }, uniquingKeysWith: { first, _ in first })
         if best.rank.category == .appName, let exactExtension {
             let matchedExtension = application.supportedTypes
                 .first(where: { $0.id == exactExtension.typeID })?.extensions
@@ -408,6 +470,14 @@ private enum MatchQuality: Int, Comparable {
         if value.contains(query) { return .contains }
         return nil
     }
+
+    static func matchExtension(_ query: String, in candidate: String) -> MatchQuality? {
+        guard !query.isEmpty else { return nil }
+        let value = candidate.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        if value == query { return .exact }
+        if value.hasPrefix(query) { return .prefix }
+        return nil
+    }
 }
 
 private struct PendingDefaultChange {
@@ -419,9 +489,24 @@ private struct SupportedTypeRow: Identifiable {
     let type: SupportedType
     let currentDefault: ApplicationInfo?
     let isApplicationDefault: Bool
+    let matchingExtension: String?
     var id: String { type.id }
-    var extensionText: String { type.extensions.isEmpty ? "—" : type.extensions.map { "." + $0 }.joined(separator: ", ") }
+    var extensionText: String { orderedExtensions.isEmpty ? "—" : orderedExtensions.map { "." + $0 }.joined(separator: ", ") }
+    var remainingExtensionText: String {
+        orderedExtensions.dropFirst().map { "." + $0 }.joined(separator: ", ")
+    }
     var displayName: String { type.displayName }
     var typeSortText: String { "\(type.displayName) \(type.contentTypeIdentifier)" }
     var defaultAppName: String { currentDefault?.name ?? "" }
+
+    private var orderedExtensions: [String] {
+        guard let matchingExtension,
+              let matchIndex = type.extensions.firstIndex(where: {
+                  $0.caseInsensitiveCompare(matchingExtension) == .orderedSame
+              }) else { return type.extensions }
+        var result = type.extensions
+        let match = result.remove(at: matchIndex)
+        result.insert(match, at: 0)
+        return result
+    }
 }
