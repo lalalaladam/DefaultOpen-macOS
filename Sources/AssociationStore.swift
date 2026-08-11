@@ -22,6 +22,7 @@ final class AssociationStore: ObservableObject {
     private let starterExtensions = ["pdf", "txt", "md", "jpg", "png", "heic", "svg", "zip", "json", "csv", "docx", "xlsx", "pptx", "html", "mp3", "mp4"]
     private var optimisticDefaultAppStatuses: [String: DefaultAppCategoryStatus] = [:]
     private var queriedApplicationExtensions = Set<String>()
+    private var queriedDefaultContentTypes = Set<String>()
 
     init() {
         customDefaultAppCategories = Self.loadCustomDefaultAppCategories()
@@ -135,6 +136,27 @@ final class AssociationStore: ObservableObject {
         mergeApplications(discovered)
         mergeIntoFileTypeCatalog([fileType])
         if let defaultApplication = launchServices.defaultApplication(for: fileType) {
+            defaultsByContentType[fileType.contentTypeIdentifier] = defaultApplication
+        }
+    }
+
+    func loadDefaultApplication(matchingExtensionSearch searchText: String) async {
+        let extensionName = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        guard !extensionName.isEmpty,
+              extensionName.count <= 32,
+              !extensionName.contains(where: { $0.isWhitespace || $0 == "." }),
+              let fileType = try? launchServices.fileType(for: extensionName),
+              defaultsByContentType[fileType.contentTypeIdentifier] == nil,
+              !queriedDefaultContentTypes.contains(fileType.contentTypeIdentifier) else { return }
+
+        queriedDefaultContentTypes.insert(fileType.contentTypeIdentifier)
+        let launchServices = self.launchServices
+        let defaultApplication = await Task.detached(priority: .userInitiated) {
+            launchServices.defaultApplication(for: fileType)
+        }.value
+        if let defaultApplication {
             defaultsByContentType[fileType.contentTypeIdentifier] = defaultApplication
         }
     }

@@ -86,6 +86,11 @@ struct FileTypesView: View {
                 }
             }
         } message: { Text(L10n.string("输入扩展名，不需要包含句点。")) }
+        .task(id: searchText) {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            await store.loadDefaultApplication(matchingExtensionSearch: searchText)
+        }
     }
 
     private var fileTypeList: some View {
