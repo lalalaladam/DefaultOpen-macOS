@@ -216,7 +216,16 @@
     "picker.openWithTitle" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"%@ 的打开方式"}},"en":{"stringUnit":{"state":"translated","value":"Open %@ With"}}}},
     "status.assignment" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"%@：%@"}},"en":{"stringUnit":{"state":"translated","value":"%@: %@"}}}},
     "search.noResults" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"没有找到“%@”"}},"en":{"stringUnit":{"state":"translated","value":"No Results for “%@”"}}}},
-    "请尝试其他搜索关键词。" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Try a different search term."}}}}
+    "请尝试其他搜索关键词。" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Try a different search term."}}}},
+    "按名称或扩展名筛选已安装的应用" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Filter installed apps by name or file extension"}}}},
+    "搜索应用或扩展名" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Search apps or extensions"}}}},
+    "可按应用名称、Bundle Identifier 或扩展名筛选；完整 UTType 也可精确匹配。" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Filter by app name, bundle identifier, or extension; complete UTTypes can also be matched exactly."}}}},
+    "名称包含“%@”" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Name contains “%@”"}}}},
+    "支持打开 %@" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Opens %@"}}}},
+    "支持 UTType %@" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Supports UTType %@"}}}},
+    "Bundle ID 包含“%@”" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Bundle ID contains “%@”"}}}},
+    "名称别名包含“%@”" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Name alias contains “%@”"}}}},
+    "同时支持打开 %@" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"also opens %@"}}}}
   },
   "version" : "1.0"
 }

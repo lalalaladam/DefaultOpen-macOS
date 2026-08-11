@@ -6,20 +6,16 @@ struct ApplicationsView: View {
     @State private var searchText = ""
     @State private var selectedAppID: String?
 
-    private var filteredApps: [ApplicationInfo] {
-        guard !searchText.isEmpty else { return store.applications }
+    private var searchResults: [ApplicationSearchResult] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let ext = query.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
-        return store.applications.filter { app in
-            app.name.localizedCaseInsensitiveContains(query)
-            || app.searchAliases.contains { $0.localizedCaseInsensitiveContains(query) }
-            || app.bundleIdentifier.localizedCaseInsensitiveContains(query)
-            || app.supportedTypes.contains { type in
-                type.extensions.contains(ext)
-                || type.displayName.localizedCaseInsensitiveContains(query)
-                || type.contentTypeIdentifier.localizedCaseInsensitiveContains(query)
-            }
+        guard !query.isEmpty else {
+            return store.applications.map { ApplicationSearchResult(application: $0) }
         }
+        return store.applications.compactMap { ApplicationSearchResult(application: $0, query: query) }
+            .sorted {
+                if $0.rank != $1.rank { return $0.rank < $1.rank }
+                return $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending
+            }
     }
 
     var body: some View {
@@ -39,12 +35,13 @@ struct ApplicationsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HSplitView {
-                    List(filteredApps, selection: $selectedAppID) { app in
+                    List(searchResults, selection: $selectedAppID) { result in
+                        let app = result.application
                         HStack(spacing: 10) {
                             AppIcon(url: app.url, size: 34)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(app.name)
-                                Text(app.bundleIdentifier).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                Text(result.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }.padding(.vertical, 3).tag(app.id)
                     }
@@ -52,8 +49,11 @@ struct ApplicationsView: View {
                     .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
                     .background(Color.clear)
 
-                    if let app = store.applications.first(where: { $0.id == selectedAppID }) {
-                        ApplicationDetailView(application: app)
+                    if let result = searchResults.first(where: { $0.application.id == selectedAppID }) {
+                        ApplicationDetailView(application: result.application,
+                                              searchQuery: searchText,
+                                              matchingTypeIDs: result.matchingTypeIDs,
+                                              bestMatchingTypeID: result.bestMatchingTypeID)
                             .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ContentUnavailableView(L10n.string("选择一个应用程序"), systemImage: "app",
@@ -70,11 +70,11 @@ struct ApplicationsView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text(L10n.string("应用程序")).font(.title2.weight(.semibold))
-                Text(L10n.string("按名称或支持的文件类型筛选已安装的应用")).font(.callout).foregroundStyle(.secondary)
+                Text(L10n.string("按名称或扩展名筛选已安装的应用")).font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            SearchBox(prompt: "搜索应用或文件类型", text: $searchText)
-                .help(L10n.string("可按应用名称、Bundle Identifier、扩展名或文件类型筛选。"))
+            SearchBox(prompt: "搜索应用或扩展名", text: $searchText)
+                .help(L10n.string("可按应用名称、Bundle Identifier 或扩展名筛选；完整 UTType 也可精确匹配。"))
             Button { Task { await store.scanApplications() } } label: {
                 Label(
                     LanguageSettings.shared.string(store.isScanning ? "正在扫描…" : "重新扫描"),
@@ -91,6 +91,9 @@ struct ApplicationsView: View {
 private struct ApplicationDetailView: View {
     @EnvironmentObject private var store: AssociationStore
     let application: ApplicationInfo
+    let searchQuery: String
+    let matchingTypeIDs: Set<SupportedType.ID>
+    let bestMatchingTypeID: SupportedType.ID?
     @State private var selected = Set<SupportedType.ID>()
     @State private var sortColumn: SupportedTypeSortColumn = .extensionName
     @State private var sortAscending = true
@@ -172,9 +175,10 @@ private struct ApplicationDetailView: View {
                 .padding(.horizontal, 12).frame(height: 30)
                 Divider()
 
-                ScrollView(.vertical) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(rows) { row in
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.vertical) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(rows) { row in
                             HStack(spacing: 12) {
                                 Text(row.extensionText)
                                     .font(.system(.callout, design: .monospaced))
@@ -202,15 +206,35 @@ private struct ApplicationDetailView: View {
                                     .frame(width: actionWidth)
                             }
                             .padding(.horizontal, 12).frame(height: 52)
-                            .background(selected.contains(row.id) ? Color.accentColor.opacity(0.18) : Color.clear)
+                            .background(rowBackground(row.id))
                             .contentShape(Rectangle())
                             .onTapGesture { selectRow(row.id) }
+                            .id(row.id)
                             Divider().padding(.leading, 12)
+                        }
+                    }
+                }
+                    .task(id: scrollTargetID) {
+                        guard let bestMatchingTypeID else { return }
+                        await Task.yield()
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            scrollProxy.scrollTo(bestMatchingTypeID, anchor: .center)
                         }
                     }
                 }
             }
         }
+    }
+
+    private var scrollTargetID: String {
+        "\(application.id)|\(searchQuery)|\(bestMatchingTypeID ?? "")"
+    }
+
+    private func rowBackground(_ id: SupportedType.ID) -> Color {
+        if selected.contains(id) { return Color.accentColor.opacity(0.18) }
+        if id == bestMatchingTypeID { return Color.orange.opacity(0.20) }
+        if matchingTypeIDs.contains(id) { return Color.orange.opacity(0.10) }
+        return Color.clear
     }
 
     private func selectRow(_ id: SupportedType.ID) {
@@ -286,6 +310,104 @@ private struct ApplicationDetailView: View {
 
 private enum SupportedTypeSortColumn {
     case extensionName, typeName, defaultAppName
+}
+
+private struct ApplicationSearchResult: Identifiable {
+    let application: ApplicationInfo
+    let subtitle: String
+    let rank: SearchRank
+    let matchingTypeIDs: Set<SupportedType.ID>
+    let bestMatchingTypeID: SupportedType.ID?
+
+    var id: String { application.id }
+
+    init(application: ApplicationInfo) {
+        self.application = application
+        subtitle = application.bundleIdentifier
+        rank = SearchRank(category: .bundleOrAlias, quality: .contains)
+        matchingTypeIDs = []
+        bestMatchingTypeID = nil
+    }
+
+    init?(application: ApplicationInfo, query: String) {
+        let normalizedQuery = query.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let extensionQuery = normalizedQuery.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        var candidates: [(rank: SearchRank, subtitle: String, typeID: SupportedType.ID?)] = []
+
+        if let quality = MatchQuality.match(normalizedQuery, in: application.name) {
+            candidates.append((SearchRank(category: .appName, quality: quality),
+                               L10n.format("名称包含“%@”", query), nil))
+        }
+        for type in application.supportedTypes {
+            for fileExtension in type.extensions {
+                if let quality = MatchQuality.match(extensionQuery, in: fileExtension) {
+                    candidates.append((SearchRank(category: .fileExtension, quality: quality),
+                                       L10n.format("支持打开 %@", ".\(fileExtension)"), type.id))
+                }
+            }
+            if normalizedQuery.contains("."),
+               type.contentTypeIdentifier.folding(options: [.caseInsensitive, .diacriticInsensitive],
+                                                   locale: .current) == normalizedQuery {
+                candidates.append((SearchRank(category: .utType, quality: .exact),
+                                   L10n.format("支持 UTType %@", type.contentTypeIdentifier), type.id))
+            }
+        }
+        if let quality = MatchQuality.match(normalizedQuery, in: application.bundleIdentifier) {
+            candidates.append((SearchRank(category: .bundleOrAlias, quality: quality),
+                               L10n.format("Bundle ID 包含“%@”", query), nil))
+        }
+        if application.searchAliases.contains(where: { MatchQuality.match(normalizedQuery, in: $0) != nil }) {
+            candidates.append((SearchRank(category: .bundleOrAlias, quality: .contains),
+                               L10n.format("名称别名包含“%@”", query), nil))
+        }
+
+        guard let best = candidates.min(by: { $0.rank < $1.rank }) else { return nil }
+        let typeMatches = candidates.filter { $0.typeID != nil }.sorted { $0.rank < $1.rank }
+        let exactExtension = typeMatches.first { $0.rank.category == .fileExtension && $0.rank.quality == .exact }
+
+        self.application = application
+        rank = best.rank
+        matchingTypeIDs = Set(typeMatches.compactMap(\.typeID))
+        bestMatchingTypeID = (exactExtension ?? typeMatches.first)?.typeID
+        if best.rank.category == .appName, let exactExtension {
+            let matchedExtension = application.supportedTypes
+                .first(where: { $0.id == exactExtension.typeID })?.extensions
+                .first(where: { $0.caseInsensitiveCompare(extensionQuery) == .orderedSame })
+            subtitle = matchedExtension.map {
+                "\(best.subtitle) · \(L10n.format("同时支持打开 %@", ".\($0)"))"
+            } ?? best.subtitle
+        } else {
+            subtitle = best.subtitle
+        }
+    }
+}
+
+private struct SearchRank: Comparable {
+    let category: SearchCategory
+    let quality: MatchQuality
+
+    static func < (lhs: SearchRank, rhs: SearchRank) -> Bool {
+        lhs.category == rhs.category ? lhs.quality < rhs.quality : lhs.category < rhs.category
+    }
+}
+
+private enum SearchCategory: Int, Comparable {
+    case appName, fileExtension, utType, bundleOrAlias
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
+private enum MatchQuality: Int, Comparable {
+    case exact, prefix, contains
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+
+    static func match(_ query: String, in candidate: String) -> MatchQuality? {
+        guard !query.isEmpty else { return nil }
+        let value = candidate.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        if value == query { return .exact }
+        if value.hasPrefix(query) { return .prefix }
+        if value.contains(query) { return .contains }
+        return nil
+    }
 }
 
 private struct PendingDefaultChange {
