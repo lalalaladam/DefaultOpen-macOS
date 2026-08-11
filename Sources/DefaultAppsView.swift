@@ -106,15 +106,15 @@ private struct DefaultAppCategoryCard: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 7) {
-                    Text(category.title).font(.headline)
+                    Text(category.title).font(.title3.weight(.semibold))
                     if category.isCustom {
                         Text("自定义")
-                            .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                             .padding(.horizontal, 5).padding(.vertical, 2)
                             .background(.secondary.opacity(0.12), in: Capsule())
                     }
                 }
-                Text(category.subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(category.subtitle).font(.callout).foregroundStyle(.secondary)
                 currentLabel
             }
             Spacer(minLength: 12)
@@ -137,7 +137,7 @@ private struct DefaultAppCategoryCard: View {
             }
         }
         .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 126, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 136, alignment: .leading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -152,22 +152,22 @@ private struct DefaultAppCategoryCard: View {
                 Text(app.name).lineLimit(1)
                 Text("当前默认").foregroundStyle(.secondary)
             }
-            .font(.callout.weight(.medium))
+            .font(.body.weight(.medium))
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 Label("尚未统一", systemImage: "exclamationmark.circle")
-                    .font(.callout.weight(.medium)).foregroundStyle(.orange)
+                    .font(.body.weight(.medium)).foregroundStyle(.orange)
                 ForEach(status.assignments.prefix(2)) { assignment in
                     Text("\(assignment.application.name)：\(assignment.targets.joined(separator: "、"))")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }
                 if status.assignments.count > 2 {
                     Text("另有 \(status.assignments.count - 2) 个 App…")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(.secondary)
                 }
                 if !status.missingTargets.isEmpty {
                     Text("未设置：\(status.missingTargets.joined(separator: "、"))")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }

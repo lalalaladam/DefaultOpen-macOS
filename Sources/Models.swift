@@ -124,11 +124,12 @@ struct DefaultAppCategoryStatus {
 struct AppIcon: View {
     let url: URL?
     var size: CGFloat = 32
+    @State private var image: NSImage?
 
     var body: some View {
         Group {
-            if let url {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+            if let image {
+                Image(nsImage: image)
                     .resizable()
             } else {
                 Image(systemName: "app.dashed")
@@ -139,5 +140,42 @@ struct AppIcon: View {
         }
         .aspectRatio(contentMode: .fit)
         .frame(width: size, height: size)
+        .task(id: url?.path) {
+            guard let url else {
+                image = nil
+                return
+            }
+            image = await ApplicationIconCache.shared.icon(for: url)
+        }
+    }
+}
+
+private final class ApplicationIconCache: @unchecked Sendable {
+    static let shared = ApplicationIconCache()
+
+    private let images = NSCache<NSURL, NSImage>()
+    private let lock = NSLock()
+
+    private init() {
+        images.countLimit = 256
+    }
+
+    func icon(for url: URL) async -> NSImage {
+        if let cached = cachedIcon(for: url) { return cached }
+
+        let image = await Task.detached(priority: .userInitiated) {
+            NSWorkspace.shared.icon(forFile: url.path)
+        }.value
+
+        lock.withLock {
+            images.setObject(image, forKey: url as NSURL)
+        }
+        return image
+    }
+
+    private func cachedIcon(for url: URL) -> NSImage? {
+        lock.withLock {
+            images.object(forKey: url as NSURL)
+        }
     }
 }
