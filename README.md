@@ -2,6 +2,12 @@
 
 [中文](#中文) | [English](#english)
 
+<p align="center">
+  <img src="docs/assets/default-apps-demo.gif"
+       alt="DefaultOpen 默认应用管理演示"
+       width="900">
+</p>
+
 ## 中文
 
 ### 简介
