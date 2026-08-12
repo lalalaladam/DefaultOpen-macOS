@@ -83,7 +83,9 @@ private struct SidebarView: View {
                     }
                     .foregroundStyle(selection == item ? Color.white : Color.primary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SidebarPressSelectingButtonStyle {
+                    selection = item
+                })
             }
             Spacer()
             Button(action: settingsAction) {
@@ -103,6 +105,17 @@ private struct SidebarView: View {
         .padding(.horizontal, 12)
         .frame(maxHeight: .infinity)
         .background(.ultraThinMaterial)
+    }
+}
+
+private struct SidebarPressSelectingButtonStyle: ButtonStyle {
+    let onPress: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed { onPress() }
+            }
     }
 }
 

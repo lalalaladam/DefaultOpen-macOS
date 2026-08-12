@@ -786,52 +786,62 @@ private struct DefaultAppPickerSheet: View {
                                        description: Text(L10n.string("系统没有注册能够处理这些类型的应用。")))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(candidates) { candidate in
-                    Button {
-                        selectedCandidateID = candidate.id
-                        resultMessage = nil
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: selectedCandidateID == candidate.id
-                                  ? "largecircle.fill.circle" : "circle")
-                                .foregroundStyle(selectedCandidateID == candidate.id
-                                                 ? Color.accentColor : Color.secondary)
-                            AppIcon(url: candidate.application.url, size: 38)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(candidate.application.name).foregroundStyle(.primary)
-                                Text(candidate.application.bundleIdentifier)
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                if !candidate.currentTargets.isEmpty && !candidate.isCurrentDefault {
-                                    let targetsText = L10n.format(
-                                        "status.currentTargets",
-                                        candidate.currentTargets.joined(separator: L10n.string("list.separator"))
-                                    )
-                                    Text(targetsText)
+                ScrollViewReader { proxy in
+                    List(candidates) { candidate in
+                        Button {
+                            selectedCandidateID = candidate.id
+                            resultMessage = nil
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: selectedCandidateID == candidate.id
+                                      ? "largecircle.fill.circle" : "circle")
+                                    .foregroundStyle(selectedCandidateID == candidate.id
+                                                     ? Color.accentColor : Color.secondary)
+                                AppIcon(url: candidate.application.url, size: 38)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(candidate.application.name).foregroundStyle(.primary)
+                                    Text(candidate.application.bundleIdentifier)
                                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                        .help(targetsText)
+                                    if !candidate.currentTargets.isEmpty && !candidate.isCurrentDefault {
+                                        let targetsText = L10n.format(
+                                            "status.currentTargets",
+                                            candidate.currentTargets.joined(separator: L10n.string("list.separator"))
+                                        )
+                                        Text(targetsText)
+                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                            .help(targetsText)
+                                    }
+                                }
+                                .alignmentGuide(.listRowSeparatorLeading) { dimensions in
+                                    dimensions[.leading]
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    if candidate.isCurrentDefault {
+                                        Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
+                                            .font(.callout.weight(.medium)).foregroundStyle(.green)
+                                    }
+                                    Text(L10n.format("status.supportedFraction", candidate.supportedCount, candidate.totalCount))
+                                        .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                                 }
                             }
-                            .alignmentGuide(.listRowSeparatorLeading) { dimensions in
-                                dimensions[.leading]
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 4) {
-                                if candidate.isCurrentDefault {
-                                    Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
-                                        .font(.callout.weight(.medium)).foregroundStyle(.green)
-                                }
-                                Text(L10n.format("status.supportedFraction", candidate.supportedCount, candidate.totalCount))
-                                    .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                            }
+                            .padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .disabled(isApplying)
+                        .id(candidate.id)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isApplying)
+                    .scrollContentBackground(.hidden)
+                    .onChange(of: selectedCandidateID) { _, candidateID in
+                        guard let candidateID else { return }
+                        Task { @MainActor in
+                            await Task.yield()
+                            proxy.scrollTo(candidateID)
+                        }
+                    }
                 }
-                .scrollContentBackground(.hidden)
             }
 
             Divider()

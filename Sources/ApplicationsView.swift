@@ -66,7 +66,9 @@ struct ApplicationsView: View {
                             }
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressSelectingButtonStyle {
+                            selectedAppID = app.id
+                        })
                         .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
                     }
                     .scrollContentBackground(.hidden)
@@ -120,6 +122,17 @@ struct ApplicationsView: View {
             .buttonStyle(.bordered)
             .disabled(store.isScanning)
         }.padding(.horizontal, 22).padding(.vertical, 16)
+    }
+}
+
+private struct PressSelectingButtonStyle: ButtonStyle {
+    let onPress: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                if isPressed { onPress() }
+            }
     }
 }
 
