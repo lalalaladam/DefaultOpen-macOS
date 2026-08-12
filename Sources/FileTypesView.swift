@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct FileTypesView: View {
     @EnvironmentObject private var store: AssociationStore
@@ -11,7 +10,6 @@ struct FileTypesView: View {
     @State private var sortColumn: FileTypeSortColumn = .extensionName
     @State private var sortAscending = true
     @State private var highlightedTypeID: FileTypeInfo.ID?
-    @State private var expandedExtensions = Set<String>()
     @State private var managingCustomExtensions = false
     @State private var typePendingDeletion: FileTypeInfo?
     @State private var typePendingAddition: FileTypeInfo?
@@ -45,26 +43,6 @@ struct FileTypesView: View {
             }
             return sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
         }.map(\.row)
-    }
-
-    private var groups: [FileTypeGroup] {
-        Dictionary(grouping: rows, by: { $0.extensionName.lowercased() }).values.map {
-            FileTypeGroup(rows: $0)
-        }.sorted { lhs, rhs in
-            let comparison: ComparisonResult
-            switch sortColumn {
-            case .extensionName:
-                comparison = lhs.extensionName.localizedStandardCompare(rhs.extensionName)
-            case .displayName:
-                comparison = lhs.displayName.localizedStandardCompare(rhs.displayName)
-            case .defaultAppName:
-                comparison = lhs.defaultAppName.localizedStandardCompare(rhs.defaultAppName)
-            }
-            if comparison == .orderedSame {
-                return lhs.extensionName.localizedStandardCompare(rhs.extensionName) == .orderedAscending
-            }
-            return sortAscending ? comparison == .orderedAscending : comparison == .orderedDescending
-        }
     }
 
     var body: some View {
@@ -116,16 +94,12 @@ struct FileTypesView: View {
                 if store.addExtension(newExtension) {
                     showsAllTypes = true
                     searchText = ""
-                    highlightedTypeID = store.fileTypes.first {
-                        $0.extensionName.caseInsensitiveCompare(normalized) == .orderedSame
-                    }?.id
-                    expandedExtensions.insert(normalized)
-                    let addedTypeID = highlightedTypeID
+                    highlightedTypeID = normalized
                     newExtension = ""
                     Task { await store.loadAllFileTypes() }
                     Task { @MainActor in
                         try? await Task.sleep(for: .seconds(2))
-                        if highlightedTypeID == addedTypeID { highlightedTypeID = nil }
+                        if highlightedTypeID == normalized { highlightedTypeID = nil }
                     }
                 }
             }
@@ -138,10 +112,6 @@ struct FileTypesView: View {
             }
             guard !Task.isCancelled else { return }
             await store.loadDefaultApplication(matchingExtensionSearch: searchText)
-            let query = searchText.trimmingCharacters(in: CharacterSet(charactersIn: " .")).lowercased()
-            if !query.isEmpty {
-                expandedExtensions.formUnion(groups.map(\.id))
-            }
         }
     }
 
@@ -168,21 +138,63 @@ struct FileTypesView: View {
                 ScrollViewReader { scrollProxy in
                     ScrollView(.vertical) {
                         LazyVStack(spacing: 0) {
-                            ForEach(groups) { group in
-                                FileTypeGroupView(
-                                    group: group,
-                                    isExpanded: expandedExtensions.contains(group.id),
-                                    extensionWidth: extensionWidth,
-                                    typeWidth: typeWidth,
-                                    defaultAppWidth: defaultAppWidth,
-                                    actionWidth: actionWidth,
-                                    highlightedTypeID: highlightedTypeID,
-                                    toggleExpanded: { toggleExpanded(group.id) },
-                                    changeType: { presentedType = $0 },
-                                    addType: { typePendingAddition = $0 },
-                                    deleteType: { typePendingDeletion = $0 }
-                                )
-                                .environmentObject(store)
+                            ForEach(rows) { row in
+                            HStack(spacing: 12) {
+                                Text(row.type.dottedExtension)
+                                    .font(.system(.body, design: .monospaced).weight(.semibold))
+                                    .lineLimit(1).frame(width: extensionWidth, alignment: .leading)
+                                    .help(row.type.dottedExtension)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(row.type.displayName).lineLimit(1).truncationMode(.tail)
+                                        if store.isCustomFileType(row.type) {
+                                            Text(L10n.string("自定义"))
+                                                .font(.caption2.weight(.medium))
+                                                .foregroundStyle(.secondary)
+                                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                                .background(.secondary.opacity(0.12), in: Capsule())
+                                        }
+                                        if row.isUnregistered {
+                                            Text(L10n.string(row.defaultApplication == nil
+                                                ? "未收录" : "已关联，未收录"))
+                                                .font(.caption2.weight(.medium))
+                                                .foregroundStyle(.secondary)
+                                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                                .background(.secondary.opacity(0.12), in: Capsule())
+                                        }
+                                    }
+                                    Text(row.type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
+                                .frame(width: typeWidth, alignment: .leading)
+                                .help("\(row.type.displayName)\n\(row.type.contentTypeIdentifier)")
+                                DefaultAppLabel(application: row.defaultApplication)
+                                    .frame(width: defaultAppWidth, alignment: .leading)
+                                HStack(spacing: 6) {
+                                    if row.isUnregistered, row.defaultApplication != nil {
+                                        Button(L10n.string("加入自定义")) {
+                                            typePendingAddition = row.type
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.regular)
+                                    }
+                                    Button(L10n.string("更改…")) { presentedType = row.type }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.regular)
+                                }
+                                .frame(width: actionWidth, alignment: .trailing)
+                            }
+                            .padding(.horizontal, 12).frame(height: 56)
+                            .background(row.id == highlightedTypeID ? Color.accentColor.opacity(0.14) : .clear)
+                            .id(row.id)
+                            .contextMenu {
+                                if store.isCustomFileType(row.type) {
+                                    Button(L10n.string("删除自定义扩展名…"), role: .destructive) {
+                                        typePendingDeletion = row.type
+                                    }
+                                }
+                            }
+                            Divider().padding(.leading, 12)
                             }
                         }
                     }
@@ -261,14 +273,6 @@ struct FileTypesView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private func toggleExpanded(_ extensionName: String) {
-        if expandedExtensions.contains(extensionName) {
-            expandedExtensions.remove(extensionName)
-        } else {
-            expandedExtensions.insert(extensionName)
-        }
     }
 
 }
@@ -381,214 +385,6 @@ private struct FileTypeRow: Identifiable {
     var defaultAppName: String { defaultApplication?.name ?? "" }
 }
 
-private struct FileTypeGroup: Identifiable {
-    let rows: [FileTypeRow]
-    init(rows: [FileTypeRow]) {
-        let roots = rows.filter { row in
-            guard let type = UTType(row.type.contentTypeIdentifier) else { return true }
-            return !rows.contains { candidate in
-                guard candidate.id != row.id,
-                      let parent = UTType(candidate.type.contentTypeIdentifier) else { return false }
-                return type.conforms(to: parent)
-            }
-        }.sorted {
-            $0.type.contentTypeIdentifier.localizedStandardCompare(
-                $1.type.contentTypeIdentifier
-            ) == .orderedAscending
-        }
-        self.rows = rows.sorted { lhs, rhs in
-            let lhsOrder = Self.order(for: lhs, roots: roots, allRows: rows)
-            let rhsOrder = Self.order(for: rhs, roots: roots, allRows: rows)
-            if lhsOrder.root != rhsOrder.root { return lhsOrder.root < rhsOrder.root }
-            if lhsOrder.depth != rhsOrder.depth { return lhsOrder.depth < rhsOrder.depth }
-            return lhs.type.contentTypeIdentifier.localizedStandardCompare(
-                rhs.type.contentTypeIdentifier
-            ) == .orderedAscending
-        }
-    }
-    var id: String { extensionName }
-    var extensionName: String { rows[0].extensionName.lowercased() }
-    var displayName: String { rows[0].displayName }
-    var defaultAppName: String { unifiedApplication?.name ?? "" }
-    var relationshipGroupCount: Int {
-        rows.filter { row in
-            guard let type = UTType(row.type.contentTypeIdentifier) else { return true }
-            return !rows.contains { candidate in
-                guard candidate.id != row.id,
-                      let parent = UTType(candidate.type.contentTypeIdentifier) else { return false }
-                return type.conforms(to: parent)
-            }
-        }.count
-    }
-    var unifiedApplication: ApplicationInfo? {
-        let applications = rows.compactMap(\.defaultApplication)
-        guard applications.count == rows.count,
-              Set(applications.map(\.bundleIdentifier)).count == 1 else { return nil }
-        return applications[0]
-    }
-
-    private static func order(for row: FileTypeRow, roots: [FileTypeRow],
-                              allRows: [FileTypeRow]) -> (root: Int, depth: Int) {
-        guard let type = UTType(row.type.contentTypeIdentifier) else {
-            return (roots.count, 0)
-        }
-        let rootIndex = roots.firstIndex { root in
-            guard let rootType = UTType(root.type.contentTypeIdentifier) else { return false }
-            return row.id == root.id || type.conforms(to: rootType)
-        } ?? roots.count
-        let depth = allRows.filter { candidate in
-            guard candidate.id != row.id,
-                  let ancestor = UTType(candidate.type.contentTypeIdentifier) else { return false }
-            return type.conforms(to: ancestor)
-        }.count
-        return (rootIndex, depth)
-    }
-}
-
-private struct FileTypeGroupView: View {
-    @EnvironmentObject private var store: AssociationStore
-    let group: FileTypeGroup
-    let isExpanded: Bool
-    let extensionWidth: CGFloat
-    let typeWidth: CGFloat
-    let defaultAppWidth: CGFloat
-    let actionWidth: CGFloat
-    let highlightedTypeID: FileTypeInfo.ID?
-    let toggleExpanded: () -> Void
-    let changeType: (FileTypeInfo) -> Void
-    let addType: (FileTypeInfo) -> Void
-    let deleteType: (FileTypeInfo) -> Void
-
-    private var relationships: [String: FileTypeRelationship] {
-        let identifiers = Set(group.rows.map { $0.type.contentTypeIdentifier })
-        return Dictionary(uniqueKeysWithValues: group.rows.map { row in
-            let type = UTType(row.type.contentTypeIdentifier)
-            let parents = group.rows.filter { candidate in
-                guard candidate.id != row.id,
-                      let parent = UTType(candidate.type.contentTypeIdentifier),
-                      type?.conforms(to: parent) == true else { return false }
-                return !group.rows.contains { middle in
-                    guard middle.id != row.id,
-                          middle.id != candidate.id,
-                          identifiers.contains(middle.type.contentTypeIdentifier),
-                          let middleType = UTType(middle.type.contentTypeIdentifier) else { return false }
-                    return type?.conforms(to: middleType) == true && middleType.conforms(to: parent)
-                }
-            }
-            let hasChildren = group.rows.contains { candidate in
-                guard let type,
-                      candidate.id != row.id,
-                      let child = UTType(candidate.type.contentTypeIdentifier) else { return false }
-                return child.conforms(to: type)
-            }
-            return (row.id, FileTypeRelationship(parentCount: parents.count, hasChildren: hasChildren))
-        })
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Button(action: toggleExpanded) {
-                HStack(spacing: 12) {
-                    HStack(spacing: 7) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            .frame(width: 12)
-                        Text("." + group.extensionName)
-                            .font(.system(.body, design: .monospaced).weight(.semibold))
-                    }
-                    .frame(width: extensionWidth, alignment: .leading)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(group.displayName).lineLimit(1)
-                        Text(L10n.format("status.typeAndGroupCount",
-                                         group.rows.count, group.relationshipGroupCount))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    .frame(width: typeWidth, alignment: .leading)
-                    if let application = group.unifiedApplication {
-                        DefaultAppLabel(application: application)
-                            .frame(width: defaultAppWidth, alignment: .leading)
-                    } else {
-                        Label(L10n.string("尚未统一"), systemImage: "exclamationmark.circle")
-                            .foregroundStyle(.orange)
-                            .frame(width: defaultAppWidth, alignment: .leading)
-                    }
-                    Color.clear.frame(width: actionWidth)
-                }
-                .padding(.horizontal, 12).frame(height: 56)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .id(group.id)
-
-            if isExpanded {
-                ForEach(group.rows) { row in
-                    let relationship = relationships[row.id]
-                        ?? FileTypeRelationship(parentCount: 0, hasChildren: false)
-                    HStack(spacing: 12) {
-                        HStack(spacing: 6) {
-                            Text(relationship.parentCount > 0 ? "└" : "•")
-                                .foregroundStyle(.tertiary)
-                            Text(relationship.parentCount > 0
-                                 ? L10n.string("子类型")
-                                 : L10n.string(relationship.hasChildren ? "基础类型" : "独立类型"))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        .padding(.leading, 18)
-                        .frame(width: extensionWidth, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(row.type.specificDisplayName).lineLimit(1).truncationMode(.tail)
-                                if store.isCustomFileType(row.type) {
-                                    Text(L10n.string("自定义")).font(.caption2.weight(.medium))
-                                        .foregroundStyle(.secondary)
-                                }
-                                if row.isUnregistered {
-                                    Text(L10n.string(row.defaultApplication == nil ? "未收录" : "已关联，未收录"))
-                                        .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-                                }
-                            }
-                            Text(row.type.contentTypeIdentifier)
-                                .font(.caption.monospaced()).foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle)
-                        }
-                        .frame(width: typeWidth, alignment: .leading)
-                        .help("\(row.type.specificDisplayName)\n\(row.type.contentTypeIdentifier)")
-                        DefaultAppLabel(application: row.defaultApplication)
-                            .frame(width: defaultAppWidth, alignment: .leading)
-                        HStack(spacing: 6) {
-                            if row.isUnregistered, row.defaultApplication != nil {
-                                Button(L10n.string("加入自定义")) { addType(row.type) }
-                                    .buttonStyle(.bordered).controlSize(.regular)
-                            }
-                            Button(L10n.string("更改…")) { changeType(row.type) }
-                                .buttonStyle(.bordered).controlSize(.regular)
-                        }
-                        .frame(width: actionWidth, alignment: .trailing)
-                    }
-                    .padding(.horizontal, 12).frame(height: 58)
-                    .background(row.id == highlightedTypeID ? Color.accentColor.opacity(0.14) : .clear)
-                    .id(row.id)
-                    .contextMenu {
-                        if store.isCustomFileType(row.type) {
-                            Button(L10n.string("删除自定义扩展名…"), role: .destructive) {
-                                deleteType(row.type)
-                            }
-                        }
-                    }
-                    Divider().padding(.leading, extensionWidth + 30)
-                }
-            }
-            Divider()
-        }
-    }
-}
-
-private struct FileTypeRelationship {
-    let parentCount: Int
-    let hasChildren: Bool
-}
-
-
 private struct DefaultAppLabel: View {
     let application: ApplicationInfo?
     var body: some View {
@@ -619,9 +415,6 @@ private struct ApplicationPickerSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(L10n.format("picker.openWithTitle", type.dottedExtension))
                         .font(.title2.weight(.semibold))
-                    Text(type.contentTypeIdentifier)
-                        .font(.callout.monospaced())
-                        .foregroundStyle(.secondary)
                     Text(L10n.string("先选择一个 App，再确认设为默认")).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -663,8 +456,6 @@ private struct ApplicationPickerSheet: View {
                         .font(.headline)
                     Text(L10n.format("picker.extensionExplanation", type.dottedExtension))
                         .font(.callout).foregroundStyle(.secondary)
-                    Text(type.contentTypeIdentifier)
-                        .font(.caption.monospaced()).foregroundStyle(.secondary)
                 } else {
                     Text(L10n.string("请先选择一个 App。点击应用不会立即修改系统设置。"))
                         .font(.callout).foregroundStyle(.secondary)
