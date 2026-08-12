@@ -142,7 +142,17 @@ struct DefaultAppCandidate: Identifiable {
     let unsupportedTargets: [String]
     let currentTargets: [String]
     let isCurrentDefault: Bool
+    let typeDetails: [DefaultAppCandidateTypeDetail]
     var id: String { application.id }
+}
+
+struct DefaultAppCandidateTypeDetail: Identifiable {
+    let id: String
+    let label: String
+    let typeName: String
+    let technicalIdentifier: String
+    let isSupported: Bool
+    let isCurrentDefault: Bool
 }
 
 struct DefaultAppChangeResult {

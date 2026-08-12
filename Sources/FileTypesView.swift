@@ -562,6 +562,9 @@ private struct FileTypeAssociationDetailsSheet: View {
         }
         .frame(width: 620, height: 540)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
+        .onAppear {
+            store.refreshDefaults(for: details.entries.map(\.type))
+        }
         .sheet(item: $typeBeingChanged) { type in
             ApplicationPickerSheet(type: type)
                 .environmentObject(store)
@@ -750,7 +753,14 @@ private struct ApplicationPickerSheet: View {
         }
         .frame(width: 580, height: 620)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
-        .onAppear { applications = store.capableApplications(for: type) }
+        .onAppear {
+            store.refreshDefaults(for: [type])
+            applications = store.capableApplications(for: type)
+        }
+        .onChange(of: store.defaultAppRevision) { _, _ in
+            store.refreshDefaults(for: [type])
+            applications = store.capableApplications(for: type)
+        }
         .alert(L10n.string("无法使用所选 App"), isPresented: Binding(
             get: { validationMessage != nil },
             set: { if !$0 { validationMessage = nil } }

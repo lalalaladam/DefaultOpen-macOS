@@ -210,6 +210,9 @@ private struct ApplicationDetailView: View {
             selected.removeAll()
             pendingDefaultChange = nil
         }
+        .task(id: application.id) {
+            store.refreshDefaults(for: application.supportedTypes.flatMap { store.fileTypes(for: $0) })
+        }
     }
 
     private var supportedTypesList: some View {
@@ -359,12 +362,13 @@ private struct ApplicationDetailView: View {
     private func makeSelectedDefault() {
         let types = application.supportedTypes.filter { selected.contains($0.id) }
             .flatMap { store.fileTypes(for: $0) }
-        let unique = Dictionary(grouping: types, by: \FileTypeInfo.id).compactMap(\.value.first)
+        let unique = Dictionary(grouping: types, by: \FileTypeInfo.contentTypeIdentifier)
+            .compactMap(\.value.first)
         guard !unique.isEmpty else {
             store.errorMessage = L10n.string("所选类型没有可用于设置关联的文件扩展名。")
             return
         }
-        pendingDefaultChange = PendingDefaultChange(types: unique, supportedTypeCount: selected.count)
+        pendingDefaultChange = PendingDefaultChange(types: unique, supportedTypeCount: unique.count)
     }
 
     private var confirmationTitle: String {
@@ -374,8 +378,11 @@ private struct ApplicationDetailView: View {
 
     private var confirmationMessage: String {
         guard let change = pendingDefaultChange else { return "" }
-        let targets = change.types.map(\.dottedExtension).joined(separator: L10n.string("list.separator"))
-        return L10n.format("application.confirmationMessage", application.name, targets)
+        if change.supportedTypeCount == 1 {
+            return L10n.format("application.confirmSingleType", application.name)
+        }
+        return L10n.format("application.confirmMultipleTypes",
+                           application.name, change.supportedTypeCount)
     }
 
     private func applyPendingDefaultChange() {
