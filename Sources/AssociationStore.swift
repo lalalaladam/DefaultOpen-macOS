@@ -45,10 +45,6 @@ final class AssociationStore: ObservableObject {
             errorMessage = L10n.string("请输入组合名称。")
             return false
         }
-        guard !normalizedExtensions.isEmpty else {
-            errorMessage = L10n.string("请至少添加一个文件扩展名。")
-            return false
-        }
         let invalidExtensions = normalizedExtensions.filter {
             (try? launchServices.fileType(for: $0)) == nil
         }
@@ -63,9 +59,7 @@ final class AssociationStore: ObservableObject {
         let category = DefaultAppCategory(
             id: id ?? "custom.\(UUID().uuidString.lowercased())",
             title: normalizedTitle,
-            subtitle: normalizedSubtitle.isEmpty
-                ? normalizedExtensions.map { "." + $0 }.joined(separator: L10n.string("list.separator"))
-                : normalizedSubtitle,
+            subtitle: normalizedSubtitle,
             symbol: symbol,
             coreExtensions: normalizedExtensions,
             optionalExtensions: [],

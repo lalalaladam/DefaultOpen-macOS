@@ -36,6 +36,75 @@ struct VisualEffectView: NSViewRepresentable {
     }
 }
 
+struct NativeMultilineTextEditor: NSViewRepresentable {
+    @Binding var text: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = false
+        scrollView.autohidesScrollers = true
+
+        let textView = NSTextView()
+        textView.delegate = context.coordinator
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainerInset = NSSize(width: 5, height: 6)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.string = text
+        scrollView.documentView = textView
+        context.coordinator.scrollView = scrollView
+        context.coordinator.textView = textView
+        context.coordinator.updateScrollerVisibility()
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        if context.coordinator.textView?.string != text {
+            context.coordinator.textView?.string = text
+        }
+        DispatchQueue.main.async {
+            context.coordinator.updateScrollerVisibility()
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        @Binding private var text: String
+        weak var scrollView: NSScrollView?
+        weak var textView: NSTextView?
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            text = textView.string
+            updateScrollerVisibility()
+        }
+
+        func updateScrollerVisibility() {
+            guard let scrollView, let textView,
+                  let layoutManager = textView.layoutManager,
+                  let textContainer = textView.textContainer else { return }
+            layoutManager.ensureLayout(for: textContainer)
+            let contentHeight = layoutManager.usedRect(for: textContainer).height
+                + textView.textContainerInset.height * 2
+            scrollView.hasVerticalScroller = contentHeight > scrollView.contentSize.height + 0.5
+        }
+    }
+}
+
 struct TranslucentRow: ViewModifier {
     let selected: Bool
     func body(content: Content) -> some View {
