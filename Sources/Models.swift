@@ -32,7 +32,7 @@ struct SupportedType: Identifiable, Hashable, Sendable {
         systemDisplayName = displayName
     }
 
-    var id: String { contentTypeIdentifier + extensions.joined(separator: ",") }
+    var id: String { contentTypeIdentifier }
     var displayName: String {
         L10n.fileTypeDisplayName(systemName: systemDisplayName,
                                  extensions: extensions,
@@ -59,13 +59,14 @@ struct FileTypeInfo: Identifiable, Hashable, Sendable {
         systemDisplayName = displayName
     }
 
-    var id: String { extensionName.lowercased() }
+    var id: String { extensionName.lowercased() + "|" + contentTypeIdentifier }
     var dottedExtension: String { "." + extensionName }
     var displayName: String {
         L10n.fileTypeDisplayName(systemName: systemDisplayName,
                                  extensions: [extensionName],
                                  identifier: contentTypeIdentifier)
     }
+    var specificDisplayName: String { systemDisplayName }
 }
 
 enum SidebarSection: String, CaseIterable, Identifiable {
@@ -140,6 +141,7 @@ struct DefaultAppCandidate: Identifiable {
     let supportedTargets: [String]
     let unsupportedTargets: [String]
     let currentTargets: [String]
+    let currentCount: Int
     let isCurrentDefault: Bool
     var id: String { application.id }
 }
@@ -156,12 +158,39 @@ struct DefaultAppAssignment: Identifiable {
     var id: String { application.id }
 }
 
+struct DefaultAppFormatAssignment: Identifiable {
+    let application: ApplicationInfo
+    let typeCount: Int
+    var id: String { application.id }
+}
+
+struct DefaultAppFormatStatus: Identifiable {
+    let id: String
+    let label: String
+    let typeCount: Int
+    let assignments: [DefaultAppFormatAssignment]
+    let missingCount: Int
+
+    var unifiedApplication: ApplicationInfo? {
+        missingCount == 0 && assignments.count == 1 ? assignments[0].application : nil
+    }
+
+    var isUnified: Bool { unifiedApplication != nil }
+}
+
 struct DefaultAppCategoryStatus {
     let unifiedApplication: ApplicationInfo?
     let assignments: [DefaultAppAssignment]
     let missingTargets: [String]
+    var formats: [DefaultAppFormatStatus] = []
 
     var isUnified: Bool { unifiedApplication != nil && missingTargets.isEmpty }
+}
+
+struct ExtensionTypeScope {
+    let extensionName: String
+    let includedTypeCount: Int
+    let independentTypeCount: Int
 }
 
 struct AppIcon: View {

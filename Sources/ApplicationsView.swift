@@ -359,7 +359,8 @@ private struct ApplicationDetailView: View {
     private func makeSelectedDefault() {
         let types = application.supportedTypes.filter { selected.contains($0.id) }
             .flatMap { store.fileTypes(for: $0) }
-        let unique = Dictionary(grouping: types, by: \FileTypeInfo.id).compactMap(\.value.first)
+        let unique = Dictionary(grouping: types, by: \FileTypeInfo.contentTypeIdentifier)
+            .compactMap(\.value.first)
         guard !unique.isEmpty else {
             store.errorMessage = L10n.string("所选类型没有可用于设置关联的文件扩展名。")
             return

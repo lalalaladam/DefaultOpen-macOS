@@ -184,28 +184,13 @@ private struct DefaultAppCategoryCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Label(L10n.string("尚未统一"), systemImage: "exclamationmark.circle")
                     .font(.body.weight(.medium)).foregroundStyle(.orange)
-                ForEach(status.assignments.prefix(2)) { assignment in
-                    let assignmentText = L10n.format(
-                        "status.assignment",
-                        assignment.application.name,
-                        assignment.targets.joined(separator: L10n.string("list.separator"))
-                    )
-                    Text(assignmentText)
-                        .font(.callout).foregroundStyle(.secondary).lineLimit(1)
-                        .help(assignmentText)
+                ForEach(status.formats.filter { !$0.isUnified }.prefix(2)) { format in
+                    DefaultAppFormatStatusRow(format: format, compact: true)
                 }
-                if status.assignments.count > 2 {
-                    Text(L10n.format("status.moreApps", status.assignments.count - 2))
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-                if !status.missingTargets.isEmpty {
-                    let missingText = L10n.format(
-                        "status.notSet",
-                        status.missingTargets.joined(separator: L10n.string("list.separator"))
-                    )
-                    Text(missingText)
-                        .font(.callout).foregroundStyle(.secondary).lineLimit(1)
-                        .help(missingText)
+                let remaining = status.formats.filter { !$0.isUnified }.count - 2
+                if remaining > 0 {
+                    Text(L10n.format("status.moreFormats", remaining))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -216,6 +201,65 @@ private struct DefaultAppCategoryEditorRequest: Identifiable {
     let id = UUID()
     let category: DefaultAppCategory?
     var duplicatesCategory = false
+}
+
+private struct DefaultAppFormatStatusList: View {
+    let formats: [DefaultAppFormatStatus]
+
+    var body: some View {
+        let rowCount = max(1, (formats.count + 1) / 2)
+        ScrollView(.vertical) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
+                      alignment: .leading, spacing: 4) {
+                ForEach(formats) { format in
+                    DefaultAppFormatStatusRow(format: format, compact: false)
+                }
+            }
+        }
+        .scrollIndicators(formats.count > 8 ? .visible : .hidden)
+        .frame(height: min(CGFloat(rowCount) * 23, 100))
+    }
+}
+
+private struct DefaultAppFormatStatusRow: View {
+    let format: DefaultAppFormatStatus
+    let compact: Bool
+
+    private var assignmentText: String {
+        var parts = format.assignments.map { assignment in
+            format.typeCount > 1
+                ? "\(assignment.application.name) \(assignment.typeCount)"
+                : assignment.application.name
+        }
+        if format.missingCount > 0 {
+            parts.append(L10n.format("status.unsetCount", format.missingCount))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Text(format.label)
+                .font(.system(.caption, design: .monospaced).weight(.semibold))
+                .frame(width: compact ? 74 : 88, alignment: .leading)
+                .lineLimit(1)
+            if format.typeCount > 1 {
+                Text(L10n.format("status.typeCount", format.typeCount))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            if let app = format.unifiedApplication {
+                AppIcon(url: app.url, size: compact ? 15 : 17)
+                Text(app.name).lineLimit(1)
+            } else {
+                Text(assignmentText)
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                    .help(assignmentText)
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.caption)
+    }
 }
 
 private struct ExtensionGroupTemplate: Identifiable {
@@ -378,12 +422,26 @@ private struct DefaultAppCategoryEditorSheet: View {
                         }
                         ScrollViewReader { proxy in
                             ScrollView(.vertical) {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 7)], alignment: .leading, spacing: 7) {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 7)], alignment: .leading, spacing: 7) {
                                     ForEach(filteredExtensions, id: \.self) { extensionName in
+                                        let scope = store.extensionTypeScope(for: extensionName)
                                         HStack(spacing: 4) {
-                                            Text(".\(extensionName)").font(.callout.monospaced())
-                                                .lineLimit(1)
-                                                .help(".\(extensionName)")
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                Text(".\(extensionName)").font(.callout.monospaced())
+                                                    .lineLimit(1)
+                                                HStack(spacing: 4) {
+                                                    Text(L10n.format("status.relatedTypeCount", scope.includedTypeCount))
+                                                    if scope.independentTypeCount > 0 {
+                                                        Label(
+                                                            L10n.format("status.independentTypeCount", scope.independentTypeCount),
+                                                            systemImage: "exclamationmark.triangle"
+                                                        )
+                                                        .foregroundStyle(.orange)
+                                                    }
+                                                }
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                            .help(extensionScopeHelp(scope))
                                             Button {
                                                 removeExtension(extensionName)
                                             } label: {
@@ -464,6 +522,14 @@ private struct DefaultAppCategoryEditorSheet: View {
         extensionNames.removeAll { $0 == extensionName }
     }
 
+    private func extensionScopeHelp(_ scope: ExtensionTypeScope) -> String {
+        var result = L10n.format("status.relatedTypeCount", scope.includedTypeCount)
+        if scope.independentTypeCount > 0 {
+            result += "\n" + L10n.format("status.independentTypesExcluded", scope.independentTypeCount)
+        }
+        return result
+    }
+
     private var filteredExtensions: [String] {
         let query = extensionSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return normalizedExtensions }
@@ -526,7 +592,10 @@ private struct DefaultAppFileTypeSelectionSheet: View {
     }
 
     private var rows: [FileTypeInfo] {
-        store.matchingCatalogFileTypes(for: searchText, includeAll: showsAllTypes).sorted {
+        var seen = Set<String>()
+        return store.matchingCatalogFileTypes(for: searchText, includeAll: showsAllTypes).filter {
+            seen.insert($0.extensionName.lowercased()).inserted
+        }.sorted {
             $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending
         }
     }
@@ -605,8 +674,15 @@ private struct DefaultAppFileTypeSelectionSheet: View {
                                 .help(type.dottedExtension)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(type.displayName).foregroundStyle(.primary)
-                                Text(type.contentTypeIdentifier)
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                let scope = store.extensionTypeScope(for: type.extensionName)
+                                HStack(spacing: 6) {
+                                    Text(L10n.format("status.relatedTypeCount", scope.includedTypeCount))
+                                    if scope.independentTypeCount > 0 {
+                                        Text(L10n.format("status.independentTypeCount", scope.independentTypeCount))
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer()
                         }
@@ -702,25 +778,7 @@ private struct DefaultAppPickerSheet: View {
                     Spacer()
                 }
                 if !currentStatus.isUnified {
-                    ForEach(currentStatus.assignments) { assignment in
-                        let assignmentText = L10n.format(
-                            "status.assignment",
-                            assignment.application.name,
-                            assignment.targets.joined(separator: L10n.string("list.separator"))
-                        )
-                        Text(assignmentText)
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .help(assignmentText)
-                    }
-                    if !currentStatus.missingTargets.isEmpty {
-                        let missingText = L10n.format(
-                            "status.notSet",
-                            currentStatus.missingTargets.joined(separator: L10n.string("list.separator"))
-                        )
-                        Text(missingText)
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .help(missingText)
-                    }
+                    DefaultAppFormatStatusList(formats: currentStatus.formats)
                 }
                 if category.hasOptionalExtensions {
                     Divider().padding(.vertical, 3)
@@ -738,25 +796,7 @@ private struct DefaultAppPickerSheet: View {
                         Spacer()
                     }
                     if !optionalStatus.isUnified {
-                        ForEach(optionalStatus.assignments) { assignment in
-                            let assignmentText = L10n.format(
-                                "status.assignment",
-                                assignment.application.name,
-                                assignment.targets.joined(separator: L10n.string("list.separator"))
-                            )
-                            Text(assignmentText)
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                .help(assignmentText)
-                        }
-                        if !optionalStatus.missingTargets.isEmpty {
-                            let missingText = L10n.format(
-                                "status.notSet",
-                                optionalStatus.missingTargets.joined(separator: L10n.string("list.separator"))
-                            )
-                            Text(missingText)
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                .help(missingText)
-                        }
+                        DefaultAppFormatStatusList(formats: optionalStatus.formats)
                     }
                 }
             }
@@ -851,9 +891,7 @@ private struct DefaultAppPickerSheet: View {
                         .font(.headline)
                     Text(L10n.format("picker.willChange", candidate.supportedTargets.joined(separator: L10n.string("list.separator"))))
                         .font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                    let estimatedChanges = candidate.supportedTargets.filter {
-                        !candidate.currentTargets.contains($0)
-                    }.count
+                    let estimatedChanges = candidate.supportedCount - candidate.currentCount
                     Text(L10n.format("picker.estimatedChanges", estimatedChanges))
                         .font(.caption).foregroundStyle(.secondary)
                     if !candidate.unsupportedTargets.isEmpty {

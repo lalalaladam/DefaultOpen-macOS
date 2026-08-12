@@ -9,7 +9,14 @@ struct AppScanner: Sendable {
 
     func scanDeclaredFileTypes() -> [SupportedType] {
         let types = scanApplicationBundles().flatMap(\.supportedTypes)
-        return Dictionary(grouping: types, by: \SupportedType.id).compactMap(\.value.first)
+        return Dictionary(grouping: types, by: \SupportedType.contentTypeIdentifier).values.map { group in
+            let first = group[0]
+            return SupportedType(
+                contentTypeIdentifier: first.contentTypeIdentifier,
+                extensions: Array(Set(group.flatMap(\.extensions))).sorted(),
+                displayName: first.displayName
+            )
+        }
     }
 
     func applicationsCapable(of fileType: FileTypeInfo) -> [ApplicationInfo] {

@@ -257,7 +257,18 @@
     "支持 UTType %@" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Supports UTType %@"}}}},
     "Bundle ID 包含“%@”" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Bundle ID contains “%@”"}}}},
     "名称别名包含“%@”" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Name alias contains “%@”"}}}},
-    "同时支持打开 %@" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"also opens %@"}}}}
+    "同时支持打开 %@" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"also opens %@"}}}},
+    "基础类型" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Base Type"}}}},
+    "子类型" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Subtype"}}}},
+    "独立类型" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Independent"}}}},
+    "status.relatedTypeCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"%ld 个关联类型"}},"en":{"stringUnit":{"state":"translated","value":"%ld related types"}}}},
+    "status.typeAndGroupCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"%ld 个类型 · %ld 个关系组"}},"en":{"stringUnit":{"state":"translated","value":"%ld types · %ld relationship groups"}}}},
+    "status.independentTypeCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"另有 %ld 个独立类型"}},"en":{"stringUnit":{"state":"translated","value":"%ld independent"}}}},
+    "status.independentTypesExcluded" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"另有 %ld 个独立类型不会包含在批量修改中"}},"en":{"stringUnit":{"state":"translated","value":"%ld independent types will not be included in batch changes"}}}},
+    "status.typeCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"%ld 个类型"}},"en":{"stringUnit":{"state":"translated","value":"%ld types"}}}},
+    "status.formatTypeCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"%@（%ld 个类型）"}},"en":{"stringUnit":{"state":"translated","value":"%@ (%ld types)"}}}},
+    "status.moreFormats" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"另有 %ld 个格式未统一…"}},"en":{"stringUnit":{"state":"translated","value":"%ld more formats are not unified…"}}}},
+    "status.unsetCount" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"未设置 %ld"}},"en":{"stringUnit":{"state":"translated","value":"Not set %ld"}}}}
   },
   "version" : "1.0"
 }

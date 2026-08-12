@@ -28,7 +28,7 @@ final class AssociationStore: ObservableObject {
     init() {
         customDefaultAppCategories = Self.loadCustomDefaultAppCategories()
         let saved = customExtensionNames
-        fileTypes = (starterExtensions + saved).uniqued().compactMap { try? launchServices.fileType(for: $0) }
+        fileTypes = (starterExtensions + saved).uniqued().flatMap { (try? launchServices.fileTypes(for: $0)) ?? [] }
             .sorted { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
         allFileTypes = fileTypes
         refreshDefaults(for: fileTypes)
@@ -47,7 +47,8 @@ final class AssociationStore: ObservableObject {
             return false
         }
         let invalidExtensions = normalizedExtensions.filter {
-            (try? launchServices.fileType(for: $0)) == nil
+            guard let types = try? launchServices.fileTypes(for: $0) else { return true }
+            return types.isEmpty
         }
         guard invalidExtensions.isEmpty else {
             errorMessage = L10n.format(
@@ -79,7 +80,23 @@ final class AssociationStore: ObservableObject {
     }
 
     func recognizedExtensions(_ extensions: [String]) -> [String] {
-        extensions.filter { (try? launchServices.fileType(for: $0)) != nil }
+        extensions.filter {
+            guard let types = try? launchServices.fileTypes(for: $0) else { return false }
+            return !types.isEmpty
+        }
+    }
+
+    func extensionTypeScope(for extensionName: String) -> ExtensionTypeScope {
+        let allTypes = (try? launchServices.fileTypes(for: extensionName)) ?? []
+        let includedTypes = (try? launchServices.fileTypeFamily(for: extensionName)) ?? []
+        let includedIdentifiers = Set(includedTypes.map(\.contentTypeIdentifier))
+        return ExtensionTypeScope(
+            extensionName: extensionName.lowercased(),
+            includedTypeCount: includedTypes.count,
+            independentTypeCount: allTypes.filter {
+                !includedIdentifiers.contains($0.contentTypeIdentifier)
+            }.count
+        )
     }
 
     func removeCustomDefaultAppCategory(_ category: DefaultAppCategory) {
@@ -120,20 +137,21 @@ final class AssociationStore: ObservableObject {
               extensionName.count <= 32,
               !extensionName.contains(where: { $0.isWhitespace || $0 == "." }),
               !queriedApplicationExtensions.contains(extensionName),
-              let fileType = try? launchServices.fileType(for: extensionName) else { return }
+              let matchingTypes = try? launchServices.fileTypes(for: extensionName),
+              !matchingTypes.isEmpty else { return }
 
         queriedApplicationExtensions.insert(extensionName)
         let scanner = self.scanner
         let discovered = await Task.detached(priority: .userInitiated) {
-            scanner.applicationsCapable(of: fileType)
+            matchingTypes.flatMap { scanner.applicationsCapable(of: $0) }
         }.value
         guard !discovered.isEmpty else { return }
         mergeApplications(discovered)
-        if UTType(fileType.contentTypeIdentifier)?.isDynamic == false {
-            mergeIntoFileTypeCatalog([fileType])
-        }
-        if let defaultApplication = launchServices.defaultApplication(for: fileType) {
-            defaultsByContentType[fileType.contentTypeIdentifier] = defaultApplication
+        mergeIntoFileTypeCatalog(matchingTypes)
+        for type in matchingTypes {
+            if let defaultApplication = launchServices.defaultApplication(for: type) {
+                defaultsByContentType[type.contentTypeIdentifier] = defaultApplication
+            }
         }
     }
 
@@ -144,17 +162,23 @@ final class AssociationStore: ObservableObject {
         guard !extensionName.isEmpty,
               extensionName.count <= 32,
               !extensionName.contains(where: { $0.isWhitespace || $0 == "." }),
-              let fileType = try? launchServices.fileType(for: extensionName),
-              defaultsByContentType[fileType.contentTypeIdentifier] == nil,
-              !queriedDefaultContentTypes.contains(fileType.contentTypeIdentifier) else { return }
+              let matchingTypes = try? launchServices.fileTypes(for: extensionName),
+              !matchingTypes.isEmpty else { return }
 
-        queriedDefaultContentTypes.insert(fileType.contentTypeIdentifier)
+        let typesToQuery = matchingTypes.filter {
+            defaultsByContentType[$0.contentTypeIdentifier] == nil
+                && !queriedDefaultContentTypes.contains($0.contentTypeIdentifier)
+        }
+        guard !typesToQuery.isEmpty else { return }
+        queriedDefaultContentTypes.formUnion(typesToQuery.map(\.contentTypeIdentifier))
         let launchServices = self.launchServices
-        let defaultApplication = await Task.detached(priority: .userInitiated) {
-            launchServices.defaultApplication(for: fileType)
+        let results = await Task.detached(priority: .userInitiated) {
+            typesToQuery.map { ($0, launchServices.defaultApplication(for: $0)) }
         }.value
-        if let defaultApplication {
-            defaultsByContentType[fileType.contentTypeIdentifier] = defaultApplication
+        for (type, defaultApplication) in results {
+            if let defaultApplication {
+                defaultsByContentType[type.contentTypeIdentifier] = defaultApplication
+            }
         }
     }
 
@@ -184,21 +208,27 @@ final class AssociationStore: ObservableObject {
 
     func addExtension(_ value: String) -> Bool {
         do {
-            let type = try launchServices.fileType(for: value)
-            let isKnownType = allFileTypes.contains(where: { $0.id == type.id })
-            if !fileTypes.contains(where: { $0.id == type.id }) {
-                fileTypes.append(type)
+            let types = try launchServices.fileTypes(for: value)
+            guard let type = types.first else { throw AssociationError.invalidExtension(value) }
+            let isKnownExtension = allFileTypes.contains {
+                $0.extensionName.caseInsensitiveCompare(type.extensionName) == .orderedSame
+            }
+            let newTypes = types.filter { candidate in
+                !fileTypes.contains(where: { $0.id == candidate.id })
+            }
+            if !newTypes.isEmpty {
+                fileTypes.append(contentsOf: newTypes)
                 fileTypes.sort { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
             }
-            mergeIntoFileTypeCatalog([type])
-            if !isKnownType && !starterExtensions.contains(type.extensionName.lowercased()) {
+            mergeIntoFileTypeCatalog(types)
+            if !isKnownExtension && !starterExtensions.contains(type.extensionName.lowercased()) {
                 var custom = customExtensionNames
                 if !custom.contains(type.extensionName.lowercased()) {
                     custom.append(type.extensionName.lowercased())
                     persistCustomExtensions(custom)
                 }
             }
-            refreshDefaults(for: [type])
+            refreshDefaults(for: types)
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -257,16 +287,18 @@ final class AssociationStore: ObservableObject {
 
         let supported = targets.filter { applicationSupports(application, target: $0) }
         let unsupported = targets.filter { !applicationSupports(application, target: $0) }
-        let currentTargets = targets.filter {
-            $0.defaultApplication?.bundleIdentifier == application.bundleIdentifier
-        }.map(\.label)
         return DefaultAppCandidate(
             application: application,
-            supportedCount: supported.count,
-            totalCount: targets.count,
-            supportedTargets: supported.map(\.label),
-            unsupportedTargets: unsupported.map(\.label),
-            currentTargets: currentTargets,
+            supportedCount: uniqueTargetCount(supported),
+            totalCount: uniqueTargetCount(targets),
+            supportedTargets: summarizedTargetLabels(supported),
+            unsupportedTargets: summarizedTargetLabels(unsupported),
+            currentTargets: summarizedTargetLabels(targets.filter {
+                $0.defaultApplication?.bundleIdentifier == application.bundleIdentifier
+            }),
+            currentCount: uniqueTargetCount(targets.filter {
+                $0.defaultApplication?.bundleIdentifier == application.bundleIdentifier
+            }),
             isCurrentDefault: targets.allSatisfy {
                 $0.defaultApplication?.bundleIdentifier == application.bundleIdentifier
             }
@@ -294,17 +326,24 @@ final class AssociationStore: ObservableObject {
         )
         let targets = defaultAppTargets(for: optionalCategory, includingOptional: false,
                                         includeCapabilities: false)
-        return defaultAppStatus(from: targets)
+        return defaultAppStatus(
+            from: targets,
+            formats: defaultAppFormatStatuses(for: optionalCategory, includingOptional: false)
+        )
     }
 
     private func systemDefaultAppStatus(for category: DefaultAppCategory,
                                         includingOptional: Bool) -> DefaultAppCategoryStatus {
         let targets = defaultAppTargets(for: category, includingOptional: includingOptional,
                                         includeCapabilities: false)
-        return defaultAppStatus(from: targets)
+        return defaultAppStatus(
+            from: targets,
+            formats: defaultAppFormatStatuses(for: category, includingOptional: includingOptional)
+        )
     }
 
-    private func defaultAppStatus(from targets: [DefaultAppTarget]) -> DefaultAppCategoryStatus {
+    private func defaultAppStatus(from targets: [DefaultAppTarget],
+                                  formats: [DefaultAppFormatStatus] = []) -> DefaultAppCategoryStatus {
         let missingTargets = targets.filter { $0.defaultApplication == nil }.map(\.label)
         let assignedTargets = targets.compactMap { target -> (ApplicationInfo, String)? in
             guard let app = target.defaultApplication else { return nil }
@@ -319,45 +358,44 @@ final class AssociationStore: ObservableObject {
         let unified = missingTargets.isEmpty && assignments.count == 1 ? assignments.first?.application : nil
         return DefaultAppCategoryStatus(unifiedApplication: unified,
                                         assignments: assignments,
-                                        missingTargets: missingTargets)
+                                        missingTargets: missingTargets,
+                                        formats: formats)
     }
 
     func defaultAppCandidates(for category: DefaultAppCategory,
                               includingOptional: Bool) -> [DefaultAppCandidate] {
         let coreTargets = defaultAppTargets(for: category, includingOptional: false, includeCapabilities: false)
         let targets = defaultAppTargets(for: category, includingOptional: includingOptional)
-        let requiredKeys = Set(coreTargets.map(\.key))
         var appsByID: [String: ApplicationInfo] = [:]
-        var coverage: [String: Set<String>] = [:]
 
         for target in targets {
             for app in target.capableApplications {
                 appsByID[app.bundleIdentifier] = app
-                coverage[app.bundleIdentifier, default: []].insert(target.key)
             }
         }
 
         let displayCoreTargets = defaultAppDisplayTargets(for: category, includingOptional: false)
         let displayTargets = defaultAppDisplayTargets(for: category, includingOptional: includingOptional)
         return appsByID.values.compactMap { app in
-            let coveredKeys = coverage[app.bundleIdentifier, default: []]
-            guard coveredKeys.isSuperset(of: requiredKeys) else { return nil }
+            guard coreTargets.allSatisfy({ applicationSupports(app, target: $0) }) else { return nil }
             guard displayCoreTargets.allSatisfy({ applicationSupports(app, target: $0) }) else { return nil }
             let supportedTargets = displayTargets.filter { applicationSupports(app, target: $0) }
-            let currentTargets = displayTargets.filter {
-                $0.defaultApplication?.bundleIdentifier == app.bundleIdentifier
-            }.map(\.label)
             let isCurrentDefault = displayTargets.allSatisfy {
                 $0.defaultApplication?.bundleIdentifier == app.bundleIdentifier
             }
             return DefaultAppCandidate(application: app,
-                                       supportedCount: supportedTargets.count,
-                                       totalCount: displayTargets.count,
-                                       supportedTargets: supportedTargets.map(\.label),
-                                       unsupportedTargets: displayTargets.filter {
+                                       supportedCount: uniqueTargetCount(supportedTargets),
+                                       totalCount: uniqueTargetCount(displayTargets),
+                                       supportedTargets: summarizedTargetLabels(supportedTargets),
+                                       unsupportedTargets: summarizedTargetLabels(displayTargets.filter {
                                            !applicationSupports(app, target: $0)
-                                       }.map(\.label),
-                                       currentTargets: currentTargets,
+                                       }),
+                                       currentTargets: summarizedTargetLabels(displayTargets.filter {
+                                           $0.defaultApplication?.bundleIdentifier == app.bundleIdentifier
+                                       }),
+                                       currentCount: uniqueTargetCount(displayTargets.filter {
+                                           $0.defaultApplication?.bundleIdentifier == app.bundleIdentifier
+                                       }),
                                        isCurrentDefault: isCurrentDefault)
         }.sorted {
             if $0.supportedCount != $1.supportedCount { return $0.supportedCount > $1.supportedCount }
@@ -439,7 +477,12 @@ final class AssociationStore: ObservableObject {
                 optimisticDefaultAppStatuses[statusKey] = DefaultAppCategoryStatus(
                     unifiedApplication: application,
                     assignments: [DefaultAppAssignment(application: application, targets: selectedLabels)],
-                    missingTargets: []
+                    missingTargets: [],
+                    formats: defaultAppFormatStatuses(
+                        for: category,
+                        includingOptional: includingOptional,
+                        overridingWith: application
+                    )
                 )
             }
             defaultAppRevision += 1
@@ -561,9 +604,11 @@ final class AssociationStore: ObservableObject {
             return FileTypeSearchResult(type: type, rank: rank)
         }
         if hasLoadedAllFileTypes,
-           let exactType = try? launchServices.fileType(for: extensionQuery),
-           !matches.contains(where: { $0.type.id == exactType.id }) {
-            matches.append(FileTypeSearchResult(type: exactType, rank: .unregistered))
+           let exactTypes = try? launchServices.fileTypes(for: extensionQuery) {
+            matches.append(contentsOf: exactTypes.compactMap { exactType in
+                guard !matches.contains(where: { $0.type.id == exactType.id }) else { return nil }
+                return FileTypeSearchResult(type: exactType, rank: .unregistered)
+            })
         }
         return matches
     }
@@ -651,7 +696,7 @@ final class AssociationStore: ObservableObject {
     private func resolvedFileTypes(for category: DefaultAppCategory,
                                    includingOptional: Bool) -> [FileTypeInfo] {
         let types = category.extensions(includingOptional: includingOptional)
-            .compactMap { try? launchServices.fileType(for: $0) }
+            .flatMap { (try? launchServices.fileTypeFamily(for: $0)) ?? [] }
         return Dictionary(grouping: types, by: \FileTypeInfo.contentTypeIdentifier).compactMap(\.value.first)
     }
 
@@ -667,9 +712,8 @@ final class AssociationStore: ObservableObject {
         }
 
         let extensions = category.extensions(includingOptional: includingOptional)
-        let resolved = extensions.compactMap { ext -> (String, FileTypeInfo)? in
-            guard let type = try? launchServices.fileType(for: ext) else { return nil }
-            return (ext, type)
+        let resolved = extensions.flatMap { ext -> [(String, FileTypeInfo)] in
+            ((try? launchServices.fileTypeFamily(for: ext)) ?? []).map { (ext, $0) }
         }
         var order: [String] = []
         var typeByIdentifier: [String: FileTypeInfo] = [:]
@@ -703,17 +747,126 @@ final class AssociationStore: ObservableObject {
             )
         }
         let fileTargets = category.extensions(includingOptional: includingOptional)
-            .compactMap { ext -> DefaultAppTarget? in
-            guard let type = try? launchServices.fileType(for: ext) else { return nil }
-            return DefaultAppTarget(
-                key: "extension:\(ext)",
-                label: "." + ext,
-                kind: .fileType(type),
-                defaultApplication: launchServices.defaultApplication(for: type),
-                capableApplications: []
+            .flatMap { ext -> [DefaultAppTarget] in
+                ((try? launchServices.fileTypeFamily(for: ext)) ?? []).map { type in
+                    DefaultAppTarget(
+                        key: "type:\(type.contentTypeIdentifier)",
+                        label: "." + ext,
+                        kind: .fileType(type),
+                        defaultApplication: launchServices.defaultApplication(for: type),
+                        capableApplications: []
+                    )
+                }
+            }
+        return schemeTargets + fileTargets
+    }
+
+    private func summarizedTargetLabels(_ targets: [DefaultAppTarget]) -> [String] {
+        var schemeLabels: [String] = []
+        var entries: [(labels: [String], keys: Set<String>)] = []
+        for target in targets {
+            if target.key.hasPrefix("scheme:") {
+                if !schemeLabels.contains(target.label) { schemeLabels.append(target.label) }
+                continue
+            }
+            let matching = entries.indices.filter {
+                entries[$0].keys.contains(target.key) || entries[$0].labels.contains(target.label)
+            }
+            if let first = matching.first {
+                var mergedLabels = entries[first].labels
+                var mergedKeys = entries[first].keys
+                for index in matching.dropFirst().reversed() {
+                    mergedLabels.append(contentsOf: entries[index].labels)
+                    mergedKeys.formUnion(entries[index].keys)
+                    entries.remove(at: index)
+                }
+                mergedLabels.append(target.label)
+                mergedKeys.insert(target.key)
+                entries[first] = (mergedLabels.uniqued(), mergedKeys)
+            } else {
+                entries.append(([target.label], [target.key]))
+            }
+        }
+        return schemeLabels + entries.map { entry in
+            let label = entry.labels.joined(separator: "/")
+            return entry.keys.count > 1
+                ? L10n.format("status.formatTypeCount", label, entry.keys.count) : label
+        }
+    }
+
+    private func uniqueTargetCount(_ targets: [DefaultAppTarget]) -> Int {
+        Set(targets.map(\.key)).count
+    }
+
+    private func defaultAppFormatStatuses(for category: DefaultAppCategory,
+                                          includingOptional: Bool,
+                                          overridingWith application: ApplicationInfo? = nil)
+        -> [DefaultAppFormatStatus] {
+        var result = category.urlSchemes.map { scheme in
+            let current = application ?? launchServices.defaultApplication(forURLScheme: scheme)
+            return DefaultAppFormatStatus(
+                id: "scheme:\(scheme)",
+                label: scheme.uppercased(),
+                typeCount: 1,
+                assignments: current.map {
+                    [DefaultAppFormatAssignment(application: $0, typeCount: 1)]
+                } ?? [],
+                missingCount: current == nil ? 1 : 0
             )
         }
-        return schemeTargets + fileTargets
+
+        let entries = category.extensions(includingOptional: includingOptional).map { extensionName in
+            DefaultAppFormatEntry(
+                extensions: [extensionName],
+                types: (try? launchServices.fileTypeFamily(for: extensionName)) ?? []
+            )
+        }.filter { !$0.types.isEmpty }
+
+        var groups: [DefaultAppFormatEntry] = []
+        for entry in entries {
+            let entryIdentifiers = Set(entry.types.map(\.contentTypeIdentifier))
+            let overlapping = groups.indices.filter { index in
+                !entryIdentifiers.isDisjoint(with: Set(groups[index].types.map(\.contentTypeIdentifier)))
+            }
+            guard let firstIndex = overlapping.first else {
+                groups.append(entry)
+                continue
+            }
+            var merged = groups[firstIndex]
+            for index in overlapping.reversed() where index != firstIndex {
+                merged.extensions.append(contentsOf: groups[index].extensions)
+                merged.types.append(contentsOf: groups[index].types)
+                groups.remove(at: index)
+            }
+            merged.extensions.append(contentsOf: entry.extensions)
+            merged.types.append(contentsOf: entry.types)
+            merged.extensions = merged.extensions.uniqued()
+            merged.types = Dictionary(grouping: merged.types, by: \.contentTypeIdentifier)
+                .compactMap(\.value.first)
+            groups[firstIndex] = merged
+        }
+
+        result += groups.map { group in
+            let assignments = group.types.compactMap { type -> ApplicationInfo? in
+                application ?? launchServices.defaultApplication(for: type)
+            }
+            let assignmentGroups = Dictionary(grouping: assignments, by: \.bundleIdentifier)
+            let formatAssignments = assignmentGroups.values.compactMap { apps -> DefaultAppFormatAssignment? in
+                guard let app = apps.first else { return nil }
+                return DefaultAppFormatAssignment(application: app, typeCount: apps.count)
+            }.sorted {
+                if $0.typeCount != $1.typeCount { return $0.typeCount > $1.typeCount }
+                return $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending
+            }
+            return DefaultAppFormatStatus(
+                id: "extension:" + group.extensions.joined(separator: ","),
+                label: group.extensions.map { $0.uppercased() }.joined(separator: "/"),
+                typeCount: group.types.count,
+                assignments: formatAssignments,
+                missingCount: group.types.count - assignments.count
+            )
+        }
+        return result
     }
 
     private func applicationSupports(_ application: ApplicationInfo, target: DefaultAppTarget) -> Bool {
@@ -740,7 +893,6 @@ final class AssociationStore: ObservableObject {
         }
         guard let requestedType = UTType(fileType.contentTypeIdentifier) else { return false }
         return application.supportedTypes.contains { supported in
-            if supported.extensions.contains(fileType.extensionName.lowercased()) { return true }
             guard let declaredType = UTType(supported.contentTypeIdentifier) else { return false }
             return requestedType == declaredType || requestedType.conforms(to: declaredType)
         }
@@ -846,6 +998,11 @@ private struct DefaultAppTarget {
     let kind: DefaultAppTargetKind
     let defaultApplication: ApplicationInfo?
     let capableApplications: [ApplicationInfo]
+}
+
+private struct DefaultAppFormatEntry {
+    var extensions: [String]
+    var types: [FileTypeInfo]
 }
 
 private enum DefaultAppTargetKind {
