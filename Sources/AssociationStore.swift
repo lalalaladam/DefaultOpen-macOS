@@ -24,6 +24,7 @@ final class AssociationStore: ObservableObject {
     private var queriedApplicationExtensions = Set<String>()
     private var queriedDefaultContentTypes = Set<String>()
     private var lastActivationDefaults: [String: ApplicationInfo?]?
+    private var registeredFileTypesByExtension: [String: [FileTypeInfo]] = [:]
 
     init() {
         customDefaultAppCategories = Self.loadCustomDefaultAppCategories()
@@ -231,6 +232,19 @@ final class AssociationStore: ObservableObject {
 
     func defaultApplication(for type: FileTypeInfo) -> ApplicationInfo? {
         defaultsByContentType[type.contentTypeIdentifier]
+    }
+
+    func registeredFileTypes(forExtension extensionName: String) -> [FileTypeInfo] {
+        let normalized = extensionName.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
+            .lowercased()
+        if let cached = registeredFileTypesByExtension[normalized] { return cached }
+        let types = (try? launchServices.fileTypes(for: normalized)) ?? []
+        registeredFileTypesByExtension[normalized] = types
+        return types
+    }
+
+    func currentSystemDefaultApplication(for type: FileTypeInfo) -> ApplicationInfo? {
+        launchServices.defaultApplication(for: type)
     }
 
     func capableApplications(for type: FileTypeInfo) -> [ApplicationInfo] {

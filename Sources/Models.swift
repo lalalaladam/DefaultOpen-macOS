@@ -66,6 +66,7 @@ struct FileTypeInfo: Identifiable, Hashable, Sendable {
                                  extensions: [extensionName],
                                  identifier: contentTypeIdentifier)
     }
+    var specificDisplayName: String { systemDisplayName }
 }
 
 enum SidebarSection: String, CaseIterable, Identifiable {

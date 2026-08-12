@@ -13,6 +13,7 @@ struct FileTypesView: View {
     @State private var managingCustomExtensions = false
     @State private var typePendingDeletion: FileTypeInfo?
     @State private var typePendingAddition: FileTypeInfo?
+    @State private var presentedAssociationDetails: FileTypeAssociationDetails?
 
     private var rows: [FileTypeRow] {
         let matches = store.matchingFileTypes(for: searchText, includeAll: showsAllTypes)
@@ -57,6 +58,10 @@ struct FileTypesView: View {
         }
         .sheet(isPresented: $managingCustomExtensions) {
             CustomExtensionsSheet().environmentObject(store)
+        }
+        .sheet(item: $presentedAssociationDetails) { details in
+            FileTypeAssociationDetailsSheet(details: details)
+                .environmentObject(store)
         }
         .confirmationDialog(L10n.string("加入自定义扩展名？"), isPresented: Binding(
             get: { typePendingAddition != nil },
@@ -128,7 +133,7 @@ struct FileTypesView: View {
                 HStack(spacing: 12) {
                     sortableHeader("扩展名", column: .extensionName, width: extensionWidth)
                     sortableHeader("文件类型", column: .displayName, width: typeWidth)
-                    sortableHeader("当前默认 App", column: .defaultAppName, width: defaultAppWidth)
+                    sortableHeader("此文件类型的默认 App", column: .defaultAppName, width: defaultAppWidth)
                     Color.clear.frame(width: actionWidth)
                 }
                 .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
@@ -139,6 +144,7 @@ struct FileTypesView: View {
                     ScrollView(.vertical) {
                         LazyVStack(spacing: 0) {
                             ForEach(rows) { row in
+                            let otherRegisteredTypeCount = otherRegisteredTypes(for: row.type).count
                             HStack(spacing: 12) {
                                 Text(row.type.dottedExtension)
                                     .font(.system(.body, design: .monospaced).weight(.semibold))
@@ -161,6 +167,27 @@ struct FileTypesView: View {
                                                 .foregroundStyle(.secondary)
                                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                                 .background(.secondary.opacity(0.12), in: Capsule())
+                                        }
+                                        if otherRegisteredTypeCount > 0 {
+                                            Button {
+                                                showAssociationDetails(for: row.type)
+                                            } label: {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: "info.circle.fill")
+                                                    Text(L10n.format("status.otherRegisteredTypes",
+                                                                     otherRegisteredTypeCount))
+                                                    Image(systemName: "chevron.right")
+                                                        .font(.system(size: 8, weight: .bold))
+                                                }
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.tint)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color.accentColor.opacity(0.13), in: Capsule())
+                                                .contentShape(Capsule())
+                                            }
+                                            .buttonStyle(.plain)
+                                            .help(L10n.string("查看此扩展名的其他注册文件类型"))
                                         }
                                     }
                                     Text(row.type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
@@ -275,6 +302,40 @@ struct FileTypesView: View {
         .buttonStyle(.plain)
     }
 
+    private func otherRegisteredTypes(for representative: FileTypeInfo) -> [FileTypeInfo] {
+        store.registeredFileTypes(forExtension: representative.extensionName).filter {
+            $0.contentTypeIdentifier != representative.contentTypeIdentifier
+        }
+    }
+
+    private func showAssociationDetails(for representative: FileTypeInfo) {
+        var types = store.registeredFileTypes(forExtension: representative.extensionName)
+        if !types.contains(where: {
+            $0.contentTypeIdentifier == representative.contentTypeIdentifier
+        }) {
+            types.insert(representative, at: 0)
+        }
+        types.sort { lhs, rhs in
+            if lhs.contentTypeIdentifier == rhs.contentTypeIdentifier { return false }
+            if lhs.contentTypeIdentifier == representative.contentTypeIdentifier { return true }
+            if rhs.contentTypeIdentifier == representative.contentTypeIdentifier { return false }
+            return lhs.contentTypeIdentifier.localizedStandardCompare(
+                rhs.contentTypeIdentifier
+            ) == .orderedAscending
+        }
+        let entries = types.map {
+            FileTypeAssociationEntry(
+                type: $0,
+                defaultApplication: store.currentSystemDefaultApplication(for: $0),
+                isDisplayedType: $0.contentTypeIdentifier == representative.contentTypeIdentifier
+            )
+        }
+        presentedAssociationDetails = FileTypeAssociationDetails(
+            representative: representative,
+            entries: entries
+        )
+    }
+
 }
 
 private enum FileTypeSortColumn {
@@ -385,6 +446,167 @@ private struct FileTypeRow: Identifiable {
     var defaultAppName: String { defaultApplication?.name ?? "" }
 }
 
+private struct FileTypeAssociationEntry: Identifiable {
+    let type: FileTypeInfo
+    let defaultApplication: ApplicationInfo?
+    let isDisplayedType: Bool
+    var id: String { type.contentTypeIdentifier }
+}
+
+private struct FileTypeAssociationDetails: Identifiable {
+    let representative: FileTypeInfo
+    let entries: [FileTypeAssociationEntry]
+    var id: String { representative.id }
+}
+
+private struct FileTypeAssociationSummary: Identifiable {
+    let application: ApplicationInfo?
+    let typeCount: Int
+    var id: String { application?.bundleIdentifier ?? "__not_set__" }
+}
+
+private struct FileTypeAssociationDetailsSheet: View {
+    @EnvironmentObject private var store: AssociationStore
+    @Environment(\.dismiss) private var dismiss
+    let details: FileTypeAssociationDetails
+    @State private var typeBeingChanged: FileTypeInfo?
+
+    private var summaries: [FileTypeAssociationSummary] {
+        Dictionary(grouping: details.entries) {
+            currentApplication(for: $0)?.bundleIdentifier ?? "__not_set__"
+        }.values.compactMap { entries in
+            guard let first = entries.first else { return nil }
+            return FileTypeAssociationSummary(
+                application: currentApplication(for: first),
+                typeCount: entries.count
+            )
+        }.sorted { lhs, rhs in
+            if lhs.application == nil { return false }
+            if rhs.application == nil { return true }
+            return (lhs.application?.name ?? "").localizedStandardCompare(
+                rhs.application?.name ?? ""
+            ) == .orderedAscending
+        }
+    }
+
+    private var displayedEntry: FileTypeAssociationEntry? {
+        details.entries.first(where: \.isDisplayedType)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.format("association.title", details.representative.dottedExtension))
+                        .font(.title2.weight(.semibold))
+                    Text(L10n.string("主列表仅显示一个文件类型及其默认 App。其他注册类型不会由“更改…”操作修改。"))
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(20)
+
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let displayedEntry {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(L10n.string("主列表显示"))
+                                .font(.headline)
+                            associationRow(displayedEntry, showsIdentifier: true)
+                                .padding(12)
+                                .background(.primary.opacity(0.055),
+                                            in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.string("按默认 App 汇总"))
+                            .font(.headline)
+                        ForEach(summaries) { summary in
+                            HStack(spacing: 10) {
+                                AppIcon(url: summary.application?.url, size: 28)
+                                Text(summary.application?.name ?? L10n.string("未设置"))
+                                Spacer()
+                                Text(L10n.format("status.registeredTypeCount", summary.typeCount))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.string("注册文件类型"))
+                            .font(.headline)
+                        VStack(spacing: 0) {
+                            ForEach(details.entries) { entry in
+                                associationRow(entry, showsIdentifier: true)
+                                    .padding(.vertical, 9)
+                                if entry.id != details.entries.last?.id { Divider() }
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+            }
+
+            Divider()
+            HStack {
+                Text(L10n.format("status.registeredTypeCount", details.entries.count))
+                    .font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Button(L10n.string("完成")) { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 620, height: 540)
+        .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
+        .sheet(item: $typeBeingChanged) { type in
+            ApplicationPickerSheet(type: type)
+                .environmentObject(store)
+        }
+    }
+
+    private func associationRow(_ entry: FileTypeAssociationEntry,
+                                showsIdentifier: Bool) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(entry.type.specificDisplayName)
+                    if entry.isDisplayedType {
+                        Text(L10n.string("主列表"))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(.secondary.opacity(0.12), in: Capsule())
+                    }
+                }
+                if showsIdentifier {
+                    Text(entry.type.contentTypeIdentifier)
+                        .font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer()
+            let application = currentApplication(for: entry)
+            AppIcon(url: application?.url, size: 26)
+            Text(application?.name ?? L10n.string("未设置"))
+                .frame(width: 125, alignment: .leading)
+                .foregroundStyle(application == nil ? .secondary : .primary)
+            Button(L10n.string("更改…")) {
+                typeBeingChanged = entry.type
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
+    private func currentApplication(for entry: FileTypeAssociationEntry) -> ApplicationInfo? {
+        store.defaultApplication(for: entry.type) ?? entry.defaultApplication
+    }
+}
+
 private struct DefaultAppLabel: View {
     let application: ApplicationInfo?
     var body: some View {
@@ -409,13 +631,30 @@ private struct ApplicationPickerSheet: View {
         applications.first { $0.id == selectedApplicationID }
     }
 
+    private var otherRegisteredTypeCount: Int {
+        store.registeredFileTypes(forExtension: type.extensionName).filter {
+            $0.contentTypeIdentifier != type.contentTypeIdentifier
+        }.count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.format("picker.openWithTitle", type.dottedExtension))
+                    Text(L10n.format("picker.changeTypeDefaultTitle", type.dottedExtension))
                         .font(.title2.weight(.semibold))
-                    Text(L10n.string("先选择一个 App，再确认设为默认")).foregroundStyle(.secondary)
+                    Text(L10n.string("本次仅修改以下文件类型"))
+                        .font(.callout).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text(type.specificDisplayName).fontWeight(.medium)
+                        Text(type.contentTypeIdentifier)
+                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                    if otherRegisteredTypeCount > 0 {
+                        Text(L10n.string("此扩展名的其他注册类型不会被修改。"))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
             }.padding(20)
@@ -425,41 +664,63 @@ private struct ApplicationPickerSheet: View {
                                        description: Text(L10n.string("Launch Services 没有注册可打开此文件类型的应用。")))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(applications) { app in
-                    Button {
-                        selectedApplicationID = app.id
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: selectedApplicationID == app.id
-                                  ? "largecircle.fill.circle" : "circle")
-                                .foregroundStyle(selectedApplicationID == app.id
-                                                 ? Color.accentColor : Color.secondary)
-                            AppIcon(url: app.url, size: 38)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(app.name).foregroundStyle(.primary)
-                                Text(app.bundleIdentifier).font(.caption).foregroundStyle(.secondary)
+                ScrollViewReader { proxy in
+                    List(applications) { app in
+                        Button {
+                            selectedApplicationID = app.id
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: selectedApplicationID == app.id
+                                      ? "largecircle.fill.circle" : "circle")
+                                    .foregroundStyle(selectedApplicationID == app.id
+                                                     ? Color.accentColor : Color.secondary)
+                                AppIcon(url: app.url, size: 38)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(app.name).foregroundStyle(.primary)
+                                    Text(app.bundleIdentifier).font(.caption).foregroundStyle(.secondary)
+                                }
+                                .alignmentGuide(.listRowSeparatorLeading) { dimensions in
+                                    dimensions[.leading]
+                                }
+                                Spacer()
+                                if store.defaultApplication(for: type)?.bundleIdentifier == app.bundleIdentifier {
+                                    Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
+                                        .font(.callout.weight(.medium)).foregroundStyle(.green)
+                                }
                             }
-                            Spacer()
-                            if store.defaultApplication(for: type)?.bundleIdentifier == app.bundleIdentifier {
-                                Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
-                                    .font(.callout.weight(.medium)).foregroundStyle(.green)
-                            }
-                        }.padding(.vertical, 3)
-                    }.buttonStyle(.plain).disabled(isApplying)
+                            .padding(.vertical, 3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isApplying)
+                        .id(app.id)
+                    }
+                    .scrollContentBackground(.hidden)
+                    .onChange(of: selectedApplicationID) { _, applicationID in
+                        guard let applicationID else { return }
+                        Task { @MainActor in
+                            await Task.yield()
+                            proxy.scrollTo(applicationID)
+                        }
+                    }
                 }
-                .scrollContentBackground(.hidden)
             }
             Divider()
             VStack(alignment: .leading, spacing: 10) {
-                if let app = selectedApplication {
-                    Text(L10n.format("picker.setAppForExtension", app.name, type.dottedExtension))
-                        .font(.headline)
-                    Text(L10n.format("picker.extensionExplanation", type.dottedExtension))
-                        .font(.callout).foregroundStyle(.secondary)
-                } else {
-                    Text(L10n.string("请先选择一个 App。点击应用不会立即修改系统设置。"))
-                        .font(.callout).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 5) {
+                    if let app = selectedApplication {
+                        Text(L10n.format("picker.setAppForType", app.name, type.specificDisplayName))
+                            .font(.headline)
+                        Text(L10n.string("只会修改上方标明的文件类型。"))
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        Text(L10n.string("请先选择一个 App。点击应用不会立即修改系统设置。"))
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
                 }
+                .frame(maxWidth: .infinity, minHeight: 48, maxHeight: 48,
+                       alignment: .topLeading)
                 HStack {
                     Button {
                         chooseOtherApplication()
@@ -478,7 +739,7 @@ private struct ApplicationPickerSheet: View {
                             ProgressView().controlSize(.small)
                             Text(L10n.string("正在设置…"))
                         } else {
-                            Text(L10n.string("设为默认"))
+                            Text(L10n.string("设为此类型默认"))
                         }
                     }
                     .buttonStyle(.borderedProminent)

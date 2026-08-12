@@ -25,23 +25,38 @@ enum AssociationError: LocalizedError {
 }
 
 struct LaunchServicesClient: Sendable {
-    func fileType(for rawExtension: String) throws -> FileTypeInfo {
+    func fileTypes(for rawExtension: String) throws -> [FileTypeInfo] {
         let ext = rawExtension.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "."))
             .lowercased()
-        let declaredType = UTType.types(
+        guard !ext.isEmpty else { throw AssociationError.invalidExtension(rawExtension) }
+
+        var types = UTType.types(
             tag: ext,
             tagClass: .filenameExtension,
             conformingTo: nil
-        ).first { !$0.isDynamic }
-        guard !ext.isEmpty, let type = declaredType ?? UTType(filenameExtension: ext) else {
+        ).filter { !$0.isDynamic }
+        if types.isEmpty, let fallback = UTType(filenameExtension: ext) {
+            types = [fallback]
+        }
+        guard !types.isEmpty else { throw AssociationError.invalidExtension(rawExtension) }
+
+        var seen = Set<String>()
+        return types.compactMap { type in
+            guard seen.insert(type.identifier).inserted else { return nil }
+            return FileTypeInfo(
+                extensionName: ext,
+                contentTypeIdentifier: type.identifier,
+                displayName: type.localizedDescription ?? type.identifier
+            )
+        }
+    }
+
+    func fileType(for rawExtension: String) throws -> FileTypeInfo {
+        guard let representative = try fileTypes(for: rawExtension).first else {
             throw AssociationError.invalidExtension(rawExtension)
         }
-        return FileTypeInfo(
-            extensionName: ext,
-            contentTypeIdentifier: type.identifier,
-            displayName: type.localizedDescription ?? type.identifier
-        )
+        return representative
     }
 
     func defaultApplication(for type: FileTypeInfo) -> ApplicationInfo? {
