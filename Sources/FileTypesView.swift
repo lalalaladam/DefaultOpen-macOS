@@ -458,7 +458,13 @@ private struct ApplicationPickerSheet: View {
     }
 
     private func chooseOtherApplication() {
-        guard let url = chooseApplicationURL() else { return }
+        Task { @MainActor in
+            guard let url = await chooseApplicationURL() else { return }
+            useCustomApplication(at: url)
+        }
+    }
+
+    private func useCustomApplication(at url: URL) {
         do {
             let application = try store.validatedApplication(at: url, for: type)
             applications.removeAll { $0.bundleIdentifier == application.bundleIdentifier }

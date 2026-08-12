@@ -9,6 +9,7 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     private let languageSettings = LanguageSettings.shared
     private var mainWindowController: NSWindowController?
     private var aboutWindowController: AboutWindowController?
+    private var activationRefreshTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(
@@ -27,6 +28,15 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
             showMainWindow()
         }
         return true
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        activationRefreshTask?.cancel()
+        activationRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled, let self else { return }
+            await store.refreshExternalDefaultChanges()
+        }
     }
 
     private func removeLegacySpotlightItems() {

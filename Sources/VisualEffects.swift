@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
-func chooseApplicationURL() -> URL? {
+func chooseApplicationURL() async -> URL? {
     let panel = NSOpenPanel()
     panel.title = L10n.string("选择 App")
     panel.prompt = L10n.string("选择")
@@ -15,7 +15,14 @@ func chooseApplicationURL() -> URL? {
     panel.allowsMultipleSelection = false
     panel.resolvesAliases = true
     panel.treatsFilePackagesAsDirectories = false
-    return panel.runModal() == .OK ? panel.url : nil
+    guard let parentWindow = NSApp.keyWindow ?? NSApp.mainWindow else {
+        return nil
+    }
+    return await withCheckedContinuation { continuation in
+        panel.beginSheetModal(for: parentWindow) { response in
+            continuation.resume(returning: response == .OK ? panel.url : nil)
+        }
+    }
 }
 
 struct VisualEffectView: NSViewRepresentable {
@@ -102,6 +109,64 @@ struct NativeMultilineTextEditor: NSViewRepresentable {
                 + textView.textContainerInset.height * 2
             scrollView.hasVerticalScroller = contentHeight > scrollView.contentSize.height + 0.5
         }
+    }
+}
+
+struct IsolatedScrollEvents: NSViewRepresentable {
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.hostView = view
+        context.coordinator.installMonitor()
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.hostView = view
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        coordinator.removeMonitor()
+    }
+
+    final class Coordinator {
+        weak var hostView: NSView?
+        private var monitor: Any?
+
+        func installMonitor() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self,
+                      let hostView,
+                      let window = hostView.window,
+                      event.window === window,
+                      let scrollView = hostView.enclosingScrollView else { return event }
+                let location = scrollView.convert(event.locationInWindow, from: nil)
+                guard scrollView.bounds.contains(location) else { return event }
+                scrollView.verticalScrollElasticity = .none
+                let clipView = scrollView.contentView
+                guard let documentView = scrollView.documentView else { return nil }
+                let documentHeight = documentView.bounds.height
+                let viewportHeight = clipView.bounds.height
+                let maximumY = max(0, documentHeight - viewportHeight)
+                let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10
+                let proposedY = clipView.bounds.origin.y - event.scrollingDeltaY * multiplier
+                let constrainedY = min(max(proposedY, 0), maximumY)
+                if abs(constrainedY - clipView.bounds.origin.y) > 0.01 {
+                    clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: constrainedY))
+                    scrollView.reflectScrolledClipView(clipView)
+                }
+                return nil
+            }
+        }
+
+        func removeMonitor() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        deinit { removeMonitor() }
     }
 }
 

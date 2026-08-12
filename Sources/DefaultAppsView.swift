@@ -211,6 +211,32 @@ private struct DefaultAppCategoryEditorRequest: Identifiable {
     var duplicatesCategory = false
 }
 
+private struct ExtensionGroupTemplate: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let symbol: String
+    let extensionList: String
+
+    var extensions: [String] { extensionList.split(separator: " ").map(String.init) }
+
+    static let all: [ExtensionGroupTemplate] = [
+        .init(id: "image", title: "完整图片格式", subtitle: "常见、专业图像与主流 RAW 格式", symbol: "photo", extensionList: "jpg jpeg jpe jfif png apng gif bmp dib tif tiff heic heif avif webp svg svgz ico icns psd psb xcf kra ora exr hdr dds tga pcx ppm pgm pbm pnm jp2 j2k jpf jpx jpm mj2 raw dng cr2 cr3 nef nrw arw srf sr2 orf rw2 raf pef srw x3f"),
+        .init(id: "video", title: "完整视频格式", subtitle: "视频容器、摄像机与流媒体格式", symbol: "play.rectangle", extensionList: "mp4 m4v mov qt mkv webm avi divx wmv asf flv f4v mpeg mpg mpe m2v mpv ts mts m2ts vob ogv 3gp 3g2 rm rmvb dv mxf roq y4m amv nsv nut h264 h265 hevc"),
+        .init(id: "audio", title: "完整音频格式", subtitle: "有损、无损、工程、MIDI 与有声书格式", symbol: "music.note", extensionList: "mp3 m4a aac wav wave flac ogg oga opus aiff aif aifc alac ape wv wma ac3 eac3 dts mka amr au snd caf mid midi kar ra ram voc tta tak spx m4b dsf dff pcm"),
+        .init(id: "archive", title: "完整压缩与归档", subtitle: "压缩、软件包与常见归档容器", symbol: "archivebox", extensionList: "zip zipx rar r00 r01 7z tar tgz tbz tbz2 txz gz gzip bz bz2 xz lz lzma lzh lha z cab arj ace sit sitx sea cpio pax xar war jar ear apk ipa deb rpm pkg mpkg msi crx vsix whl egg iso"),
+        .init(id: "office", title: "完整办公文档", subtitle: "Office、OpenDocument、iWork、模板与旧格式", symbol: "doc.text", extensionList: "doc docx docm dot dotx dotm rtf odt ott pages wps wpd xls xlsx xlsm xlsb xlt xltx xltm ods ots numbers csv tsv ppt pptx pptm pot potx potm pps ppsx ppsm odp otp key pdf xps oxps"),
+        .init(id: "source", title: "编程源码", subtitle: "主流语言、脚本与系统开发格式", symbol: "chevron.left.forwardslash.chevron.right", extensionList: "c h cc cpp cxx hpp hh hxx m mm swift rs go java kt kts scala sc py pyw pyi rb php phpt pl pm lua r dart ex exs erl hrl fs fsi fsx fsproj cs csx vb vbs groovy gvy gradle clj cljs cljc edn hs lhs ml mli nim zig sol asm s pas pp tcl jl sh bash zsh fish ps1 bat cmd"),
+        .init(id: "data", title: "配置与数据", subtitle: "配置、结构化数据、数据库与交换格式", symbol: "curlybraces", extensionList: "json json5 jsonl ndjson yaml yml toml xml plist ini cfg conf config properties prop env editorconfig gitconfig gitattributes gitignore npmrc yarnrc babelrc eslintrc prettierrc lock csv tsv psv sql sqlite sqlite3 db db3 mdb accdb parquet avro orc proto graphql gql rss atom geojson kml gpx"),
+        .init(id: "web", title: "Web 开发", subtitle: "现代前端框架、模板与 Web 配置", symbol: "globe", extensionList: "html htm xhtml shtml css scss sass less styl js mjs cjs jsx ts mts cts tsx vue svelte astro wasm wat php asp aspx jsp hbs handlebars mustache ejs pug jade liquid twig njk mdx map webmanifest manifest htaccess"),
+        .init(id: "subtitle", title: "字幕与歌词", subtitle: "字幕、歌词与广播字幕格式", symbol: "captions.bubble", extensionList: "srt ass ssa vtt webvtt sub idx smi sami lrc ttml dfxp scc stl sbv mpl mpl2 aqt jss rt usf cap sup itt"),
+        .init(id: "ebook", title: "电子书与阅读", subtitle: "电子书、漫画包与阅读器格式", symbol: "books.vertical", extensionList: "epub mobi azw azw3 azw4 kf8 kfx fb2 fb3 djvu djv chm lit pdb prc tcr lrf lrx cbz cbr cb7 cbt opf ncx ibooks kepub oxps xps"),
+        .init(id: "font", title: "字体", subtitle: "桌面字体、Web 字体与传统字体资源", symbol: "textformat", extensionList: "ttf otf ttc otc woff woff2 eot dfont suit fon fnt pfa pfb pfm afm bdf pcf snf ufo sfd"),
+        .init(id: "design", title: "设计与 CAD", subtitle: "平面设计、CAD、BIM 与 3D 格式", symbol: "paintbrush", extensionList: "psd psb ai ait eps epsf indd indt idml xd sketch fig afdesign afphoto afpub cdr cmx dwg dxf dwt dws step stp iges igs sat sab stl obj fbx dae 3ds blend max ma mb c4d lwo lws ply gltf glb usd usda usdc usdz 3mf skp rvt rfa ifc fcstd sldprt sldasm prt asm"),
+        .init(id: "disk", title: "磁盘与虚拟机镜像", subtitle: "磁盘、光盘、虚拟机与系统镜像", symbol: "externaldrive", extensionList: "dmg iso img sparseimage sparsebundle cdr toast bin cue nrg mdf mds vhd vhdx vdi vmdk qcow qcow2 qed hdd pvm ova ovf vbox utm ipsw wim esd squashfs")
+    ]
+}
+
 private struct DefaultAppCategoryEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: AssociationStore
@@ -226,6 +252,7 @@ private struct DefaultAppCategoryEditorSheet: View {
     @State private var scrollTarget: String?
     @State private var scrollRequestID = UUID()
     @State private var confirmingSaveWithDraft = false
+    @State private var extensionSearchText = ""
     @FocusState private var focusedField: EditorField?
 
     private enum EditorField {
@@ -311,42 +338,67 @@ private struct DefaultAppCategoryEditorSheet: View {
                 HStack {
                     Button(L10n.string("添加")) { addDraftExtensions() }
                         .disabled(parsedExtensions(from: extensionDraft).isEmpty)
+                    Menu {
+                        ForEach(ExtensionGroupTemplate.all) { template in
+                            Button {
+                                appendTemplate(template)
+                            } label: {
+                                Label(L10n.string(template.title), systemImage: template.symbol)
+                            }
+                        }
+                    } label: {
+                        Label(L10n.string("从模板添加…"), systemImage: "square.stack.3d.up.badge.a")
+                    }
                     Spacer()
                     if !extensionNames.isEmpty {
                         Button(L10n.string("清空标签"), role: .destructive) {
                             extensionNames.removeAll()
+                            extensionSearchText = ""
                         }
                     }
                 }
                 Text(L10n.string("可直接输入或粘贴多个扩展名，使用逗号、空格、分号或换行分隔；句点会自动移除，重复项会自动合并。"))
                     .font(.caption).foregroundStyle(.secondary)
                 if !normalizedExtensions.isEmpty {
-                    ScrollViewReader { proxy in
-                        ScrollView(.horizontal) {
-                            HStack(spacing: 7) {
-                                ForEach(normalizedExtensions, id: \.self) { extensionName in
-                                    HStack(spacing: 4) {
-                                        Text(".\(extensionName)").font(.callout.monospaced())
-                                        Button {
-                                            removeExtension(extensionName)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.caption).foregroundStyle(.secondary)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .help(L10n.format("action.removeExtension", extensionName))
-                                    }
-                                    .padding(.horizontal, 8).padding(.vertical, 5)
-                                    .background(.secondary.opacity(0.12), in: Capsule())
-                                    .id(extensionName)
-                                }
-                            }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(L10n.format("status.extensionCount", normalizedExtensions.count))
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            TextField(L10n.string("搜索标签"), text: $extensionSearchText)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 180)
                         }
-                        .scrollIndicators(.hidden)
-                        .onChange(of: scrollRequestID) { _, _ in
-                            guard let latestExtension = scrollTarget else { return }
-                            withAnimation {
-                                proxy.scrollTo(latestExtension, anchor: .trailing)
+                        ScrollViewReader { proxy in
+                            ScrollView(.vertical) {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 7)], alignment: .leading, spacing: 7) {
+                                    ForEach(filteredExtensions, id: \.self) { extensionName in
+                                        HStack(spacing: 4) {
+                                            Text(".\(extensionName)").font(.callout.monospaced())
+                                                .lineLimit(1)
+                                            Button {
+                                                removeExtension(extensionName)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .help(L10n.format("action.removeExtension", extensionName))
+                                        }
+                                        .padding(.horizontal, 8).padding(.vertical, 5)
+                                        .background(.secondary.opacity(0.12), in: Capsule())
+                                        .id(extensionName)
+                                    }
+                                }
+                                .background(IsolatedScrollEvents())
+                            }
+                            .padding(.trailing, 4)
+                            .frame(maxHeight: 112)
+                            .onChange(of: scrollRequestID) { _, _ in
+                                guard extensionSearchText.isEmpty, let latestExtension = scrollTarget else { return }
+                                withAnimation {
+                                    proxy.scrollTo(latestExtension, anchor: .bottom)
+                                }
                             }
                         }
                     }
@@ -358,8 +410,6 @@ private struct DefaultAppCategoryEditorSheet: View {
                         Label(L10n.string("从所有类型选择…"), systemImage: "checklist")
                     }
                     Spacer()
-                    Text(L10n.format("status.extensionCount", normalizedExtensions.count))
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)
@@ -394,13 +444,8 @@ private struct DefaultAppCategoryEditorSheet: View {
             Text(L10n.string("输入框中的扩展名尚未添加，不会保存到组合中。"))
         }
         .sheet(isPresented: $choosingFileTypes) {
-            DefaultAppFileTypeSelectionSheet(initiallySelected: Set(normalizedExtensions)) { selected in
-                extensionNames = selected.sorted {
-                    $0.localizedStandardCompare($1) == .orderedAscending
-                }
-                extensionDraft = ""
-                scrollTarget = extensionNames.last
-                scrollRequestID = UUID()
+            DefaultAppFileTypeSelectionSheet(initiallySelected: []) { selected in
+                appendExtensionsToDraft(selected.sorted())
                 choosingFileTypes = false
             }
             .environmentObject(store)
@@ -409,6 +454,12 @@ private struct DefaultAppCategoryEditorSheet: View {
 
     private func removeExtension(_ extensionName: String) {
         extensionNames.removeAll { $0 == extensionName }
+    }
+
+    private var filteredExtensions: [String] {
+        let query = extensionSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return normalizedExtensions }
+        return normalizedExtensions.filter { $0.localizedCaseInsensitiveContains(query) }
     }
 
     private func parsedExtensions(from text: String) -> [String] {
@@ -425,6 +476,21 @@ private struct DefaultAppCategoryEditorSheet: View {
         extensionDraft = ""
         scrollTarget = additions.last(where: { !previous.contains($0) })
         if scrollTarget != nil { scrollRequestID = UUID() }
+        focusedField = .extensions
+    }
+
+    private func appendTemplate(_ template: ExtensionGroupTemplate) {
+        let recognized = store.recognizedExtensions(template.extensions)
+        appendExtensionsToDraft(recognized)
+    }
+
+    private func appendExtensionsToDraft(_ candidates: [String]) {
+        let existing = Set(parsedExtensions(from: extensionDraft))
+        let additions = candidates.filter { !existing.contains($0) }.uniquedPreservingOrder()
+        if !additions.isEmpty {
+            let separator = extensionDraft.isEmpty || extensionDraft.last?.isWhitespace == true ? "" : " "
+            extensionDraft += separator + additions.joined(separator: " ")
+        }
         focusedField = .extensions
     }
 
@@ -841,7 +907,13 @@ private struct DefaultAppPickerSheet: View {
     }
 
     private func chooseOtherApplication() {
-        guard let url = chooseApplicationURL() else { return }
+        Task { @MainActor in
+            guard let url = await chooseApplicationURL() else { return }
+            useCustomApplication(at: url)
+        }
+    }
+
+    private func useCustomApplication(at url: URL) {
         do {
             let candidate = try store.validatedDefaultAppCandidate(
                 at: url,

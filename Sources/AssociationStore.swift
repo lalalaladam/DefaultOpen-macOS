@@ -23,6 +23,7 @@ final class AssociationStore: ObservableObject {
     private var optimisticDefaultAppStatuses: [String: DefaultAppCategoryStatus] = [:]
     private var queriedApplicationExtensions = Set<String>()
     private var queriedDefaultContentTypes = Set<String>()
+    private var lastActivationDefaults: [String: ApplicationInfo?]?
 
     init() {
         customDefaultAppCategories = Self.loadCustomDefaultAppCategories()
@@ -75,6 +76,10 @@ final class AssociationStore: ObservableObject {
         removeOptimisticDefaultAppStatuses(for: category)
         defaultAppRevision += 1
         return true
+    }
+
+    func recognizedExtensions(_ extensions: [String]) -> [String] {
+        extensions.filter { (try? launchServices.fileType(for: $0)) != nil }
     }
 
     func removeCustomDefaultAppCategory(_ category: DefaultAppCategory) {
@@ -501,6 +506,35 @@ final class AssociationStore: ObservableObject {
             } else {
                 defaultsByContentType.removeValue(forKey: type.contentTypeIdentifier)
             }
+        }
+    }
+
+    func refreshExternalDefaultChanges() async {
+        let types = Dictionary(grouping: fileTypes + allFileTypes, by: \.contentTypeIdentifier)
+            .compactMap(\.value.first)
+        let launchServices = self.launchServices
+        let refreshed = await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: types.map { type in
+                (type.contentTypeIdentifier, launchServices.defaultApplication(for: type))
+            })
+        }.value
+        defer { lastActivationDefaults = refreshed }
+        guard let previous = lastActivationDefaults else { return }
+        guard defaultsFingerprint(previous) != defaultsFingerprint(refreshed) else { return }
+        optimisticDefaultAppStatuses.removeAll()
+        for (identifier, application) in refreshed {
+            if let application {
+                defaultsByContentType[identifier] = application
+            } else {
+                defaultsByContentType.removeValue(forKey: identifier)
+            }
+        }
+        defaultAppRevision += 1
+    }
+
+    private func defaultsFingerprint(_ values: [String: ApplicationInfo?]) -> [String: String] {
+        values.reduce(into: [:]) { result, item in
+            result[item.key] = item.value?.bundleIdentifier ?? ""
         }
     }
 
