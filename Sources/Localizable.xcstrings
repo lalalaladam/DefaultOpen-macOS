@@ -26,7 +26,7 @@
     "选择 DefaultOpen 使用的界面语言" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose the interface language used by DefaultOpen"}}}},
     "语言" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Language"}}}},
     "简体中文" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Simplified Chinese"}}}},
-    "English" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"English"}},"en":{"stringUnit":{"state":"translated","value":"English"}}}},
+    "English" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"英语"}},"en":{"stringUnit":{"state":"translated","value":"English"}}}},
     "选择后需要确认；系统提供的应用名称和文件类型名称仍可能跟随 macOS 语言。" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"You will be asked to confirm your selection. App names and file type names supplied by the system may still follow the macOS language."}}}},
     "确认切换语言？" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Change Language?"}}}},
     "切换语言" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Change Language"}}}},
