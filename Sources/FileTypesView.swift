@@ -12,6 +12,7 @@ struct FileTypesView: View {
     @State private var highlightedTypeID: FileTypeInfo.ID?
     @State private var managingCustomExtensions = false
     @State private var typePendingDeletion: FileTypeInfo?
+    @State private var typePendingAddition: FileTypeInfo?
 
     private var rows: [FileTypeRow] {
         let matches = store.matchingFileTypes(for: searchText, includeAll: showsAllTypes)
@@ -57,6 +58,20 @@ struct FileTypesView: View {
         .sheet(isPresented: $managingCustomExtensions) {
             CustomExtensionsSheet().environmentObject(store)
         }
+        .confirmationDialog(L10n.string("加入自定义扩展名？"), isPresented: Binding(
+            get: { typePendingAddition != nil },
+            set: { if !$0 { typePendingAddition = nil } }
+        ), titleVisibility: .visible) {
+            if let type = typePendingAddition {
+                Button(L10n.format("action.addExtension", type.dottedExtension)) {
+                    _ = store.addExtension(type.extensionName)
+                    typePendingAddition = nil
+                }
+            }
+            Button(L10n.string("取消"), role: .cancel) { typePendingAddition = nil }
+        } message: {
+            Text(L10n.string("只会将此扩展名保存到 DefaultOpen 的自定义类型，不会修改当前默认 App。"))
+        }
         .confirmationDialog(L10n.string("删除自定义扩展名？"), isPresented: Binding(
             get: { typePendingDeletion != nil },
             set: { if !$0 { typePendingDeletion = nil } }
@@ -69,7 +84,7 @@ struct FileTypesView: View {
             }
             Button(L10n.string("取消"), role: .cancel) { typePendingDeletion = nil }
         } message: {
-            Text(L10n.string("只会移除本应用保存的自定义记录，不会删除任何文件或系统类型。"))
+            Text(L10n.string("只会移除 DefaultOpen 保存的自定义记录，不会解除或修改 macOS 默认打开关系。"))
         }
         .alert(L10n.string("添加文件扩展名"), isPresented: $addingExtension) {
             TextField(L10n.string("例如：webp"), text: $newExtension)
@@ -91,6 +106,10 @@ struct FileTypesView: View {
         } message: { Text(L10n.string("输入扩展名，不需要包含句点。")) }
         .task(id: searchText) {
             try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await store.loadAllFileTypes()
+            }
             guard !Task.isCancelled else { return }
             await store.loadDefaultApplication(matchingExtensionSearch: searchText)
         }
@@ -124,6 +143,7 @@ struct FileTypesView: View {
                                 Text(row.type.dottedExtension)
                                     .font(.system(.body, design: .monospaced).weight(.semibold))
                                     .lineLimit(1).frame(width: extensionWidth, alignment: .leading)
+                                    .help(row.type.dottedExtension)
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
                                         Text(row.type.displayName).lineLimit(1).truncationMode(.tail)
@@ -153,7 +173,7 @@ struct FileTypesView: View {
                                 HStack(spacing: 6) {
                                     if row.isUnregistered, row.defaultApplication != nil {
                                         Button(L10n.string("加入自定义")) {
-                                            _ = store.addExtension(row.type.extensionName)
+                                            typePendingAddition = row.type
                                         }
                                         .buttonStyle(.bordered)
                                         .controlSize(.regular)
@@ -308,6 +328,8 @@ private struct CustomExtensionsSheet: View {
                         Text(type.dottedExtension)
                             .font(.system(.body, design: .monospaced).weight(.semibold))
                             .frame(width: 90, alignment: .leading)
+                            .lineLimit(1).truncationMode(.tail)
+                            .help(type.dottedExtension)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(type.displayName)
                             Text(type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
@@ -348,7 +370,7 @@ private struct CustomExtensionsSheet: View {
             }
             Button(L10n.string("取消"), role: .cancel) { typePendingDeletion = nil }
         } message: {
-            Text(L10n.string("不会删除任何文件，也不会修改系统的文件类型数据库。"))
+            Text(L10n.string("只会移除 DefaultOpen 保存的自定义记录，不会解除或修改 macOS 默认打开关系。"))
         }
     }
 }

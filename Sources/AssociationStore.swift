@@ -98,9 +98,7 @@ final class AssociationStore: ObservableObject {
         let launchServices = self.launchServices
         let result = await Task.detached(priority: .userInitiated) {
             let apps = scanner.scanInstalledApplications(managedTypes: managedTypes)
-            let discoveredTypes = apps.flatMap(\.supportedTypes).flatMap { type -> [FileTypeInfo] in
-                type.extensions.compactMap { try? launchServices.fileType(for: $0) }
-            }
+            let discoveredTypes = apps.flatMap(\.supportedTypes).flatMap(\.fileTypes)
             var defaults: [String: ApplicationInfo] = [:]
             for type in Dictionary(grouping: managedTypes + discoveredTypes,
                                    by: \FileTypeInfo.contentTypeIdentifier).compactMap(\.value.first) {
@@ -109,9 +107,7 @@ final class AssociationStore: ObservableObject {
             return (apps, defaults)
         }.value
         applications = result.0
-        mergeIntoFileTypeCatalog(result.0.flatMap(\.supportedTypes).flatMap { supportedType in
-            supportedType.extensions.compactMap { try? launchServices.fileType(for: $0) }
-        })
+        mergeIntoFileTypeCatalog(result.0.flatMap(\.supportedTypes).flatMap(\.fileTypes))
         defaultsByContentType.merge(result.1) { _, new in new }
         isScanning = false
     }
@@ -133,7 +129,9 @@ final class AssociationStore: ObservableObject {
         }.value
         guard !discovered.isEmpty else { return }
         mergeApplications(discovered)
-        mergeIntoFileTypeCatalog([fileType])
+        if UTType(fileType.contentTypeIdentifier)?.isDynamic == false {
+            mergeIntoFileTypeCatalog([fileType])
+        }
         if let defaultApplication = launchServices.defaultApplication(for: fileType) {
             defaultsByContentType[fileType.contentTypeIdentifier] = defaultApplication
         }
@@ -167,9 +165,7 @@ final class AssociationStore: ObservableObject {
         let scanner = self.scanner
         let launchServices = self.launchServices
         let result = await Task.detached(priority: .userInitiated) {
-            let discoveredTypes = scanner.scanDeclaredFileTypes().flatMap { supportedType in
-                supportedType.extensions.compactMap { try? launchServices.fileType(for: $0) }
-            }
+            let discoveredTypes = scanner.scanDeclaredFileTypes().flatMap(\.fileTypes)
             let uniqueTypes = Dictionary(
                 grouping: discoveredTypes,
                 by: \FileTypeInfo.contentTypeIdentifier
@@ -231,7 +227,6 @@ final class AssociationStore: ObservableObject {
         persistCustomExtensions(customExtensionNames.filter { $0 != extensionName })
         fileTypes.removeAll { $0.extensionName.lowercased() == extensionName }
         allFileTypes.removeAll { $0.extensionName.lowercased() == extensionName }
-        defaultsByContentType.removeValue(forKey: type.contentTypeIdentifier)
     }
 
     func defaultApplication(for type: FileTypeInfo) -> ApplicationInfo? {
@@ -548,27 +543,42 @@ final class AssociationStore: ObservableObject {
            let fallback = fileTypes.first(where: { $0.contentTypeIdentifier == supportedType.contentTypeIdentifier }) {
             return [fallback]
         }
-        return extensions.compactMap { try? launchServices.fileType(for: $0) }
+        return supportedType.fileTypes
     }
 
     func matchingFileTypes(for searchText: String, includeAll: Bool) -> [FileTypeSearchResult] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = includeAll ? allFileTypes : fileTypes.filter { !isCustomFileType($0) }
         guard !query.isEmpty else {
+            let source = includeAll ? allFileTypes : fileTypes.filter { !isCustomFileType($0) }
             return source.map { FileTypeSearchResult(type: $0, rank: nil) }
         }
 
+        let source = allFileTypes
         let extensionQuery = query.trimmingCharacters(in: CharacterSet(charactersIn: "."))
         var matches = source.compactMap { type -> FileTypeSearchResult? in
             guard let rank = FileTypeSearchRank.match(type: type, query: query,
                                                       extensionQuery: extensionQuery) else { return nil }
             return FileTypeSearchResult(type: type, rank: rank)
         }
-        if let exactType = try? launchServices.fileType(for: extensionQuery),
+        if hasLoadedAllFileTypes,
+           let exactType = try? launchServices.fileType(for: extensionQuery),
            !matches.contains(where: { $0.type.id == exactType.id }) {
             matches.append(FileTypeSearchResult(type: exactType, rank: .unregistered))
         }
         return matches
+    }
+
+    func matchingCatalogFileTypes(for searchText: String, includeAll: Bool) -> [FileTypeInfo] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return includeAll ? allFileTypes : fileTypes.filter { !isCustomFileType($0) }
+        }
+        let source = allFileTypes
+        let extensionQuery = query.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return source.filter {
+            FileTypeSearchRank.match(type: $0, query: query,
+                                     extensionQuery: extensionQuery) != nil
+        }
     }
 
     private var customExtensionNames: [String] {

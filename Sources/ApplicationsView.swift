@@ -18,6 +18,10 @@ struct ApplicationsView: View {
             }
     }
 
+    private var searchResultIDs: [ApplicationInfo.ID] {
+        searchResults.map(\.application.id)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -35,15 +39,35 @@ struct ApplicationsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HSplitView {
-                    List(searchResults, selection: $selectedAppID) { result in
+                    List(searchResults) { result in
                         let app = result.application
-                        HStack(spacing: 10) {
-                            AppIcon(url: app.url, size: 34)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(app.name)
-                                Text(result.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        let isSelected = selectedAppID == app.id
+                        Button {
+                            selectedAppID = app.id
+                        } label: {
+                            HStack(spacing: 10) {
+                                AppIcon(url: app.url, size: 34)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(app.name)
+                                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                                    Text(result.subtitle)
+                                        .font(.caption2)
+                                        .foregroundStyle(isSelected ? Color.white.opacity(0.82) : Color.secondary)
+                                        .lineLimit(1)
+                                        .help(result.subtitle)
+                                }
                             }
-                        }.padding(.vertical, 3).tag(app.id)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 7)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(isSelected ? Color.accentColor : Color.clear)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
                     }
                     .scrollContentBackground(.hidden)
                     .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
@@ -63,6 +87,10 @@ struct ApplicationsView: View {
                     }
                 }
             }
+        }
+        .onChange(of: searchResultIDs) { _, resultIDs in
+            guard let selectedAppID, !resultIDs.contains(selectedAppID) else { return }
+            self.selectedAppID = nil
         }
         .task(id: searchText) {
             if store.applications.isEmpty { await store.scanApplications() }

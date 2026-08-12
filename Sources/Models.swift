@@ -38,6 +38,14 @@ struct SupportedType: Identifiable, Hashable, Sendable {
                                  extensions: extensions,
                                  identifier: contentTypeIdentifier)
     }
+
+    var fileTypes: [FileTypeInfo] {
+        extensions.map {
+            FileTypeInfo(extensionName: $0,
+                         contentTypeIdentifier: contentTypeIdentifier,
+                         displayName: systemDisplayName)
+        }
+    }
 }
 
 struct FileTypeInfo: Identifiable, Hashable, Sendable {

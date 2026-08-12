@@ -185,20 +185,27 @@ private struct DefaultAppCategoryCard: View {
                 Label(L10n.string("尚未统一"), systemImage: "exclamationmark.circle")
                     .font(.body.weight(.medium)).foregroundStyle(.orange)
                 ForEach(status.assignments.prefix(2)) { assignment in
-                    Text(L10n.format(
+                    let assignmentText = L10n.format(
                         "status.assignment",
                         assignment.application.name,
                         assignment.targets.joined(separator: L10n.string("list.separator"))
-                    ))
+                    )
+                    Text(assignmentText)
                         .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                        .help(assignmentText)
                 }
                 if status.assignments.count > 2 {
                     Text(L10n.format("status.moreApps", status.assignments.count - 2))
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 if !status.missingTargets.isEmpty {
-                    Text(L10n.format("status.notSet", status.missingTargets.joined(separator: L10n.string("list.separator"))))
+                    let missingText = L10n.format(
+                        "status.notSet",
+                        status.missingTargets.joined(separator: L10n.string("list.separator"))
+                    )
+                    Text(missingText)
                         .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                        .help(missingText)
                 }
             }
         }
@@ -376,6 +383,7 @@ private struct DefaultAppCategoryEditorSheet: View {
                                         HStack(spacing: 4) {
                                             Text(".\(extensionName)").font(.callout.monospaced())
                                                 .lineLimit(1)
+                                                .help(".\(extensionName)")
                                             Button {
                                                 removeExtension(extensionName)
                                             } label: {
@@ -518,15 +526,7 @@ private struct DefaultAppFileTypeSelectionSheet: View {
     }
 
     private var rows: [FileTypeInfo] {
-        let source = showsAllTypes ? store.allFileTypes : store.fileTypes
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let extensionQuery = query.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        let filtered = query.isEmpty ? source : source.filter {
-            $0.extensionName.localizedCaseInsensitiveContains(extensionQuery)
-                || $0.displayName.localizedCaseInsensitiveContains(query)
-                || $0.contentTypeIdentifier.localizedCaseInsensitiveContains(query)
-        }
-        return filtered.sorted {
+        store.matchingCatalogFileTypes(for: searchText, includeAll: showsAllTypes).sorted {
             $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending
         }
     }
@@ -601,6 +601,8 @@ private struct DefaultAppFileTypeSelectionSheet: View {
                             Text(type.dottedExtension)
                                 .font(.system(.body, design: .monospaced).weight(.semibold))
                                 .frame(width: 90, alignment: .leading)
+                                .lineLimit(1).truncationMode(.tail)
+                                .help(type.dottedExtension)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(type.displayName).foregroundStyle(.primary)
                                 Text(type.contentTypeIdentifier)
@@ -631,8 +633,10 @@ private struct DefaultAppFileTypeSelectionSheet: View {
         }
         .frame(width: 760, height: 650)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
-        .task {
-            if !store.hasLoadedAllFileTypes { await store.loadAllFileTypes() }
+        .task(id: searchText) {
+            if showsAllTypes || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await store.loadAllFileTypes()
+            }
         }
     }
 
@@ -699,16 +703,23 @@ private struct DefaultAppPickerSheet: View {
                 }
                 if !currentStatus.isUnified {
                     ForEach(currentStatus.assignments) { assignment in
-                        Text(L10n.format(
+                        let assignmentText = L10n.format(
                             "status.assignment",
                             assignment.application.name,
                             assignment.targets.joined(separator: L10n.string("list.separator"))
-                        ))
+                        )
+                        Text(assignmentText)
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .help(assignmentText)
                     }
                     if !currentStatus.missingTargets.isEmpty {
-                        Text(L10n.format("status.notSet", currentStatus.missingTargets.joined(separator: L10n.string("list.separator"))))
+                        let missingText = L10n.format(
+                            "status.notSet",
+                            currentStatus.missingTargets.joined(separator: L10n.string("list.separator"))
+                        )
+                        Text(missingText)
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .help(missingText)
                     }
                 }
                 if category.hasOptionalExtensions {
@@ -719,6 +730,7 @@ private struct DefaultAppPickerSheet: View {
                             AppIcon(url: app.url, size: 18)
                             Text(app.name).fontWeight(.medium)
                             Text(optionalDescription).foregroundStyle(.secondary)
+                                .lineLimit(1).help(optionalDescription)
                         } else {
                             Text(L10n.string("尚未统一"))
                                 .fontWeight(.medium).foregroundStyle(.orange)
@@ -727,19 +739,23 @@ private struct DefaultAppPickerSheet: View {
                     }
                     if !optionalStatus.isUnified {
                         ForEach(optionalStatus.assignments) { assignment in
-                            Text(L10n.format(
+                            let assignmentText = L10n.format(
                                 "status.assignment",
                                 assignment.application.name,
                                 assignment.targets.joined(separator: L10n.string("list.separator"))
-                            ))
+                            )
+                            Text(assignmentText)
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                .help(assignmentText)
                         }
                         if !optionalStatus.missingTargets.isEmpty {
-                            Text(L10n.format(
+                            let missingText = L10n.format(
                                 "status.notSet",
                                 optionalStatus.missingTargets.joined(separator: L10n.string("list.separator"))
-                            ))
+                            )
+                            Text(missingText)
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                .help(missingText)
                         }
                     }
                 }
@@ -786,8 +802,13 @@ private struct DefaultAppPickerSheet: View {
                                 Text(candidate.application.bundleIdentifier)
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 if !candidate.currentTargets.isEmpty && !candidate.isCurrentDefault {
-                                    Text(L10n.format("status.currentTargets", candidate.currentTargets.joined(separator: L10n.string("list.separator"))))
+                                    let targetsText = L10n.format(
+                                        "status.currentTargets",
+                                        candidate.currentTargets.joined(separator: L10n.string("list.separator"))
+                                    )
+                                    Text(targetsText)
                                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                        .help(targetsText)
                                 }
                             }
                             .alignmentGuide(.listRowSeparatorLeading) { dimensions in
