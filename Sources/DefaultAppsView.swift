@@ -168,16 +168,22 @@ private struct DefaultAppCategoryCard: View {
         if !hasTargets {
             EmptyView()
         } else if status.isUnified, let app = status.unifiedApplication {
-            HStack(spacing: 6) {
-                AppIcon(url: app.url, size: 20)
-                Text(app.name)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(L10n.string("当前默认"))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .layoutPriority(1)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    AppIcon(url: app.url, size: 20)
+                    Text(app.name)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(L10n.string("当前默认"))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .layoutPriority(1)
+                }
+                if status.ignoredTypeCount > 0 {
+                    Text(L10n.format("status.ignoredTypeCount", status.ignoredTypeCount))
+                        .font(.callout).foregroundStyle(.secondary)
+                }
             }
             .font(.body.weight(.medium))
         } else {
@@ -206,6 +212,10 @@ private struct DefaultAppCategoryCard: View {
                     Text(missingText)
                         .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                         .help(missingText)
+                }
+                if status.ignoredTypeCount > 0 {
+                    Text(L10n.format("status.ignoredTypeCount", status.ignoredTypeCount))
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             }
         }
@@ -723,6 +733,10 @@ private struct DefaultAppPickerSheet: View {
                             .help(missingText)
                     }
                 }
+                if currentStatus.ignoredTypeCount > 0 {
+                    Text(L10n.format("status.ignoredTypeCount", currentStatus.ignoredTypeCount))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if category.hasOptionalExtensions {
                     Divider().padding(.vertical, 3)
                     HStack(spacing: 8) {
@@ -758,6 +772,10 @@ private struct DefaultAppPickerSheet: View {
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 .help(missingText)
                         }
+                    }
+                    if optionalStatus.ignoredTypeCount > 0 {
+                        Text(L10n.format("status.ignoredTypeCount", optionalStatus.ignoredTypeCount))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -846,98 +864,13 @@ private struct DefaultAppPickerSheet: View {
             }
 
             Divider()
-            VStack(alignment: .leading, spacing: 10) {
-                if let candidate = selectedCandidate {
-                    Text(L10n.format("picker.setCategory", candidate.application.name, category.title))
-                        .font(.headline)
-                    Text(L10n.format("picker.willChange", candidate.supportedTargets.joined(separator: L10n.string("list.separator"))))
-                        .font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                    let estimatedChanges = candidate.typeDetails.filter {
-                        $0.isSupported && !$0.isCurrentDefault
-                    }.count
-                    Text(L10n.format("picker.estimatedChanges", estimatedChanges))
-                        .font(.caption).foregroundStyle(.secondary)
-                    if !candidate.unsupportedTargets.isEmpty {
-                        Text(L10n.format("picker.unsupportedTargets", candidate.unsupportedTargets.joined(separator: L10n.string("list.separator"))))
-                            .font(.callout).foregroundStyle(.orange).lineLimit(2)
-                    }
-                    Button {
-                        showsTypeDetails.toggle()
-                    } label: {
-                        Label(L10n.string(showsTypeDetails ? "隐藏类型详情" : "显示类型详情"),
-                              systemImage: showsTypeDetails ? "chevron.up" : "chevron.down")
-                    }
-                    .buttonStyle(.borderless)
-                    if showsTypeDetails {
-                        ScrollView {
-                            VStack(spacing: 0) {
-                                ForEach(candidate.typeDetails) { detail in
-                                    HStack(spacing: 8) {
-                                        Image(systemName: detail.isSupported
-                                              ? "checkmark.circle.fill" : "minus.circle.fill")
-                                            .foregroundStyle(detail.isSupported ? Color.green : Color.orange)
-                                        Text(detail.label).font(.callout.monospaced())
-                                            .frame(width: 70, alignment: .leading)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(detail.typeName).lineLimit(1)
-                                            Text(detail.technicalIdentifier)
-                                                .font(.caption.monospaced()).foregroundStyle(.secondary)
-                                                .lineLimit(1).truncationMode(.middle)
-                                        }
-                                        Spacer()
-                                        if detail.isCurrentDefault {
-                                            Text(L10n.string("当前默认"))
-                                                .font(.caption).foregroundStyle(.green)
-                                        } else if !detail.isSupported {
-                                            Text(L10n.string("不会修改"))
-                                                .font(.caption).foregroundStyle(.orange)
-                                        }
-                                    }
-                                    .padding(.vertical, 5)
-                                    if detail.id != candidate.typeDetails.last?.id { Divider() }
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 112)
-                    }
-                } else {
-                    Text(L10n.string("请先选择一个应用。点击应用不会立即修改系统设置。"))
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-                if let resultMessage {
-                    Text(resultMessage).font(.callout.weight(.medium)).foregroundStyle(.green)
-                }
-                if let progressText {
-                    Text(progressText).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Button {
-                        chooseOtherApplication()
-                    } label: {
-                        Label(L10n.string("选择其他 App…"), systemImage: "folder")
-                    }
-                    .disabled(isApplying)
-                    Spacer()
-                    Button(L10n.string("取消")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(isApplying)
-                    Button {
-                        applySelection()
-                    } label: {
-                        if isApplying {
-                            ProgressView().controlSize(.small)
-                            Text(L10n.string("正在设置…"))
-                        } else {
-                            Text(L10n.format("action.setAsCategory", category.title))
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(selectedCandidate == nil || isApplying)
-                }
+            ScrollView {
+                selectionSummary
             }
-            .frame(maxWidth: .infinity,
-                   minHeight: showsTypeDetails ? 238 : 126,
-                   maxHeight: showsTypeDetails ? 238 : 126,
-                   alignment: .topLeading)
-            .padding(16)
+            .frame(height: 184)
+
+            Divider()
+            actionBar
         }
         .frame(width: 620, height: 680)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
@@ -959,6 +892,125 @@ private struct DefaultAppPickerSheet: View {
     private var targetDescription: String {
         if !category.urlSchemes.isEmpty { return L10n.string("处理 HTTP 和 HTTPS 网页链接") }
         return category.coreExtensions.map { "." + $0 }.joined(separator: L10n.string("list.separator"))
+    }
+
+    @ViewBuilder private var selectionSummary: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let candidate = selectedCandidate {
+                Text(L10n.format("picker.setCategory", candidate.application.name, category.title))
+                    .font(.headline)
+                let managedSupportedTargets = candidate.typeDetails.filter {
+                    $0.isSupported && !$0.isIgnored
+                }.map(\.label).uniquedPreservingOrder()
+                let managedUnsupportedTargets = candidate.typeDetails.filter {
+                    !$0.isSupported && !$0.isIgnored
+                }.map(\.label).uniquedPreservingOrder()
+                Text(L10n.format("picker.willChange", managedSupportedTargets.joined(separator: L10n.string("list.separator"))))
+                    .font(.callout).foregroundStyle(.secondary)
+                let estimatedChanges = candidate.typeDetails.filter {
+                    $0.isSupported && !$0.isCurrentDefault && !$0.isIgnored
+                }.count
+                Text(L10n.format("picker.estimatedChanges", estimatedChanges))
+                    .font(.caption).foregroundStyle(.secondary)
+                if !managedUnsupportedTargets.isEmpty {
+                    Text(L10n.format("picker.unsupportedTargets", managedUnsupportedTargets.joined(separator: L10n.string("list.separator"))))
+                        .font(.callout).foregroundStyle(.orange)
+                }
+                Button {
+                    showsTypeDetails.toggle()
+                } label: {
+                    Label(L10n.string(showsTypeDetails ? "隐藏类型详情" : "显示类型详情"),
+                          systemImage: showsTypeDetails ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.borderless)
+                if showsTypeDetails {
+                    VStack(spacing: 0) {
+                        ForEach(candidate.typeDetails) { detail in
+                            typeDetailRow(detail)
+                            if detail.id != candidate.typeDetails.last?.id { Divider() }
+                        }
+                    }
+                }
+            } else {
+                Text(L10n.string("请先选择一个应用。点击应用不会立即修改系统设置。"))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            if let resultMessage {
+                Text(resultMessage).font(.callout.weight(.medium)).foregroundStyle(.green)
+            }
+            if let progressText {
+                Text(progressText).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(16)
+    }
+
+    private func typeDetailRow(_ detail: DefaultAppCandidateTypeDetail) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: detail.isIgnored ? "eye.slash.fill"
+                  : detail.isSupported ? "checkmark.circle.fill" : "minus.circle.fill")
+                .foregroundStyle(detail.isIgnored ? Color.secondary
+                                 : detail.isSupported ? Color.green : Color.orange)
+            Text(detail.label).font(.callout.monospaced())
+                .frame(width: 70, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(detail.typeName).lineLimit(1)
+                Text(detail.technicalIdentifier)
+                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+            HStack(spacing: 6) {
+                if detail.isCurrentDefault {
+                    Text(L10n.string("当前默认")).font(.caption).foregroundStyle(.green)
+                }
+                if detail.isIgnored {
+                    Text(L10n.string("已忽略")).font(.caption).foregroundStyle(.secondary)
+                } else if !detail.isSupported {
+                    Text(L10n.string("不会修改")).font(.caption).foregroundStyle(.orange)
+                }
+            }
+            if detail.canBeIgnored {
+                Button(L10n.string(detail.isIgnored ? "重新纳入" : "忽略此类型")) {
+                    store.setDefaultAppType(detail.technicalIdentifier,
+                                            ignored: !detail.isIgnored,
+                                            for: category)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isApplying)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+
+    private var actionBar: some View {
+        HStack {
+            Button {
+                chooseOtherApplication()
+            } label: {
+                Label(L10n.string("选择其他 App…"), systemImage: "folder")
+            }
+            .disabled(isApplying)
+            Spacer()
+            Button(L10n.string("取消")) { dismiss() }
+                .keyboardShortcut(.cancelAction).disabled(isApplying)
+            Button {
+                applySelection()
+            } label: {
+                if isApplying {
+                    ProgressView().controlSize(.small)
+                    Text(L10n.string("正在设置…"))
+                } else {
+                    Text(L10n.format("action.setAsCategory", category.title))
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(selectedCandidate?.typeDetails.contains(where: {
+                $0.isSupported && !$0.isIgnored
+            }) != true || isApplying)
+        }
+        .padding(16)
     }
 
     private var optionalDescription: String {

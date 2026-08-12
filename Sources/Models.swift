@@ -153,6 +153,8 @@ struct DefaultAppCandidateTypeDetail: Identifiable {
     let technicalIdentifier: String
     let isSupported: Bool
     let isCurrentDefault: Bool
+    let canBeIgnored: Bool
+    let isIgnored: Bool
 }
 
 struct DefaultAppChangeResult {
@@ -171,6 +173,7 @@ struct DefaultAppCategoryStatus {
     let unifiedApplication: ApplicationInfo?
     let assignments: [DefaultAppAssignment]
     let missingTargets: [String]
+    let ignoredTypeCount: Int
 
     var isUnified: Bool { unifiedApplication != nil && missingTargets.isEmpty }
 }
