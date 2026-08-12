@@ -17,7 +17,10 @@ struct FileTypesView: View {
         let matches = store.matchingFileTypes(for: searchText, includeAll: showsAllTypes)
         return matches.map { match in
             let app = store.defaultApplication(for: match.type)
-            return (row: FileTypeRow(type: match.type, defaultApplication: app), rank: match.rank)
+            return (row: FileTypeRow(type: match.type,
+                                     defaultApplication: app,
+                                     isUnregistered: match.rank == .unregistered),
+                    rank: match.rank)
         }.sorted { lhs, rhs in
             if let lhsRank = lhs.rank, let rhsRank = rhs.rank, lhsRank != rhsRank {
                 return lhsRank < rhsRank
@@ -97,7 +100,7 @@ struct FileTypesView: View {
         GeometryReader { proxy in
             let extensionWidth: CGFloat = 96
             let defaultAppWidth = min(220, max(160, proxy.size.width * 0.24))
-            let actionWidth: CGFloat = 78
+            let actionWidth: CGFloat = 142
             // Keep a stable gutter for the vertical scroller so its first appearance
             // cannot force the trailing columns to move.
             let typeWidth = max(180, proxy.size.width - extensionWidth - defaultAppWidth - actionWidth - 88)
@@ -131,6 +134,14 @@ struct FileTypesView: View {
                                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                                 .background(.secondary.opacity(0.12), in: Capsule())
                                         }
+                                        if row.isUnregistered {
+                                            Text(L10n.string(row.defaultApplication == nil
+                                                ? "未收录" : "已关联，未收录"))
+                                                .font(.caption2.weight(.medium))
+                                                .foregroundStyle(.secondary)
+                                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                                .background(.secondary.opacity(0.12), in: Capsule())
+                                        }
                                     }
                                     Text(row.type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
                                         .lineLimit(1).truncationMode(.middle)
@@ -139,10 +150,19 @@ struct FileTypesView: View {
                                 .help("\(row.type.displayName)\n\(row.type.contentTypeIdentifier)")
                                 DefaultAppLabel(application: row.defaultApplication)
                                     .frame(width: defaultAppWidth, alignment: .leading)
-                                Button(L10n.string("更改…")) { presentedType = row.type }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.regular)
-                                    .frame(width: actionWidth)
+                                HStack(spacing: 6) {
+                                    if row.isUnregistered, row.defaultApplication != nil {
+                                        Button(L10n.string("加入自定义")) {
+                                            _ = store.addExtension(row.type.extensionName)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.regular)
+                                    }
+                                    Button(L10n.string("更改…")) { presentedType = row.type }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.regular)
+                                }
+                                .frame(width: actionWidth, alignment: .trailing)
                             }
                             .padding(.horizontal, 12).frame(height: 56)
                             .background(row.id == highlightedTypeID ? Color.accentColor.opacity(0.14) : .clear)
@@ -336,6 +356,7 @@ private struct CustomExtensionsSheet: View {
 private struct FileTypeRow: Identifiable {
     let type: FileTypeInfo
     let defaultApplication: ApplicationInfo?
+    var isUnregistered = false
     var id: String { type.id }
     var extensionName: String { type.extensionName }
     var displayName: String { type.displayName }
@@ -478,9 +499,13 @@ private struct ApplicationPickerSheet: View {
 
     private func applySelection() {
         guard let application = selectedApplication else { return }
+        let shouldSaveAsCustomType = !store.isKnownFileType(type)
         isApplying = true
         Task { @MainActor in
             if await store.setDefault(application, for: [type]) {
+                if shouldSaveAsCustomType {
+                    _ = store.addExtension(type.extensionName)
+                }
                 dismiss()
             } else {
                 isApplying = false

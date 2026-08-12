@@ -221,6 +221,10 @@ final class AssociationStore: ObservableObject {
         customExtensionNames.contains(type.extensionName.lowercased())
     }
 
+    func isKnownFileType(_ type: FileTypeInfo) -> Bool {
+        allFileTypes.contains(where: { $0.id == type.id })
+    }
+
     func removeCustomExtension(_ type: FileTypeInfo) {
         let extensionName = type.extensionName.lowercased()
         guard customExtensionNames.contains(extensionName) else { return }
@@ -562,7 +566,7 @@ final class AssociationStore: ObservableObject {
         }
         if let exactType = try? launchServices.fileType(for: extensionQuery),
            !matches.contains(where: { $0.type.id == exactType.id }) {
-            matches.append(FileTypeSearchResult(type: exactType, rank: .extensionExact))
+            matches.append(FileTypeSearchResult(type: exactType, rank: .unregistered))
         }
         return matches
     }
@@ -781,6 +785,7 @@ enum FileTypeSearchRank: Int, Comparable {
     case extensionPrefix
     case displayName
     case contentTypeIdentifier
+    case unregistered
 
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 
