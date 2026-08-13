@@ -7,19 +7,53 @@ struct ApplicationInfo: Identifiable, Hashable, Sendable {
     let bundleIdentifier: String
     let name: String
     let url: URL
+    let documentTypes: [ApplicationDocumentType]
     let supportedTypes: [SupportedType]
     let searchAliases: [String]
 
     init(bundleIdentifier: String, name: String, url: URL,
+         documentTypes: [ApplicationDocumentType] = [],
          supportedTypes: [SupportedType], searchAliases: [String] = []) {
         self.bundleIdentifier = bundleIdentifier
         self.name = name
         self.url = url
+        self.documentTypes = documentTypes
         self.supportedTypes = supportedTypes
         self.searchAliases = searchAliases
     }
 
     var id: String { bundleIdentifier }
+}
+
+enum ApplicationDocumentTypeSource: String, Hashable, Sendable {
+    case bundleDeclaration
+    case launchServices
+}
+
+struct ApplicationDocumentType: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let extensions: [String]
+    let mimeTypes: [String]
+    let declaredTypeIdentifiers: [String]
+    let role: String
+    let handlerRank: String?
+    let source: ApplicationDocumentTypeSource
+
+    init(id: String, name: String, extensions: [String], mimeTypes: [String],
+         declaredTypeIdentifiers: [String], role: String, handlerRank: String?,
+         source: ApplicationDocumentTypeSource) {
+        self.id = id
+        self.name = name
+        self.extensions = extensions
+        self.mimeTypes = mimeTypes
+        self.declaredTypeIdentifiers = declaredTypeIdentifiers
+        self.role = role
+        self.handlerRank = handlerRank
+        self.source = source
+    }
+
+    var isViewer: Bool { role.caseInsensitiveCompare("Viewer") == .orderedSame }
 }
 
 struct SupportedType: Identifiable, Hashable, Sendable {

@@ -258,6 +258,10 @@ final class AssociationStore: ObservableObject {
         return types
     }
 
+    func inferredFileType(forExtension extensionName: String) -> FileTypeInfo? {
+        try? launchServices.fileType(for: extensionName)
+    }
+
     func registeredFileTypes(forExtensions extensionNames: [String]) -> [FileTypeInfo] {
         let types = extensionNames.flatMap { registeredFileTypes(forExtension: $0) }
         return Dictionary(grouping: types, by: \.contentTypeIdentifier)
@@ -807,6 +811,8 @@ final class AssociationStore: ObservableObject {
                 bundleIdentifier: existing.bundleIdentifier,
                 name: existing.name,
                 url: existing.url,
+                documentTypes: mergeDocumentTypes(existing.documentTypes,
+                                                  application.documentTypes),
                 supportedTypes: types.values.sorted {
                     $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
                 },
@@ -814,6 +820,15 @@ final class AssociationStore: ObservableObject {
             )
         }
         applications = merged.values.sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func mergeDocumentTypes(_ existing: [ApplicationDocumentType],
+                                    _ discovered: [ApplicationDocumentType]) -> [ApplicationDocumentType] {
+        var merged = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        for document in discovered { merged[document.id] = document }
+        return merged.values.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }
@@ -1008,6 +1023,11 @@ final class AssociationStore: ObservableObject {
     private func applicationSupports(_ application: ApplicationInfo, fileType: FileTypeInfo) -> Bool {
         if launchServices.capableBundleIdentifiers(forContentType: fileType.contentTypeIdentifier)
             .contains(application.bundleIdentifier) {
+            return true
+        }
+        if application.documentTypes.contains(where: {
+            $0.extensions.contains { $0.caseInsensitiveCompare(fileType.extensionName) == .orderedSame }
+        }) {
             return true
         }
         guard let requestedType = UTType(fileType.contentTypeIdentifier) else { return false }

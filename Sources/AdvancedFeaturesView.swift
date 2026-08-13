@@ -11,6 +11,7 @@ struct AdvancedFeaturesView: View {
     @State private var inspectedFile: InspectedFile?
     @State private var inspectionError: String?
     @State private var isDropTargeted = false
+    @State private var typeBeingChanged: FileTypeInfo?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +44,9 @@ struct AdvancedFeaturesView: View {
             if analyzedExtension != nil { analyzeExtension() }
             if let url = inspectedFile?.url { inspectFile(at: url) }
         }
+        .sheet(item: $typeBeingChanged) { type in
+            ApplicationPickerSheet(type: type).environmentObject(store)
+        }
     }
 
     private var header: some View {
@@ -74,25 +78,25 @@ struct AdvancedFeaturesView: View {
                 ContentUnavailableView(
                     L10n.format("advanced.noRegisteredTypes", "." + analyzedExtension),
                     systemImage: "questionmark.folder",
-                    description: Text(L10n.string("系统没有返回与这个扩展名明确关联的已声明 UTType。"))
+                    description: Text(L10n.string("系统没有返回可分析的推测类型或标签匹配 UTType。"))
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if analyses.isEmpty {
                 ContentUnavailableView(
                     L10n.string("输入扩展名开始分析"),
                     systemImage: "point.3.connected.trianglepath.dotted",
-                    description: Text(L10n.string("结果会列出所有注册 UTType、遵循关系、默认 App 和可用 App。"))
+                    description: Text(L10n.string("结果会区分普通界面使用的系统推测类型与其他标签匹配 UTType。"))
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         HStack {
-                            Text(L10n.format("advanced.registeredTypes", "." + normalizedExtension,
+                            Text(L10n.format("advanced.matchedTypes", "." + normalizedExtension,
                                              analyses.count))
                                 .font(.headline)
                             Spacer()
-                            Text(L10n.string("此页面仅用于诊断，不会修改系统设置。"))
+                            Text(L10n.string("可单独修改某个 UTType；不保证影响所有同扩展名文件。"))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         RegisteredUTTypeRelationshipsView(
@@ -101,9 +105,9 @@ struct AdvancedFeaturesView: View {
                         Divider()
                             .padding(.vertical, 4)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(L10n.string("注册 UTType 详情"))
+                            Text(L10n.string("UTType 分析与独立设置"))
                                 .font(.headline)
-                            Text(L10n.string("以下分别显示每个注册类型的元数据、默认 App 和完整上级关系。"))
+                            Text(L10n.string("仅当实际文件被识别为某个 UTType 时，该类型的默认 App 才会生效。"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -224,6 +228,7 @@ struct AdvancedFeaturesView: View {
                         .foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 Spacer()
+                sourceBadge(analysis.source)
                 riskBadge(analysis.risk)
             }
             HStack(spacing: 22) {
@@ -232,6 +237,19 @@ struct AdvancedFeaturesView: View {
                 metadataLabel("默认 App", value: analysis.defaultApplicationName)
                 metadataLabel("可用 App", value: L10n.format("advanced.appCount", analysis.capableAppCount))
             }
+            HStack {
+                Text(L10n.string(sourceDescription(analysis.source)))
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(L10n.string("单独更改此 UTType…")) {
+                    typeBeingChanged = analysis.fileType
+                }
+                .buttonStyle(.bordered)
+                .disabled(!analysis.canChange)
+                .help(L10n.string(analysis.canChange
+                                  ? "只修改此 UTType；仅在文件实际识别为该类型时生效。"
+                                  : "该类型不可解析、没有可用 App，或属于只读基础类型。"))
+            }
             Divider()
             Text(L10n.string("UTType 遵循关系（由具体到宽泛）"))
                 .font(.callout.weight(.semibold))
@@ -239,6 +257,31 @@ struct AdvancedFeaturesView: View {
         }
         .padding(16)
         .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func sourceBadge(_ source: UTTypeAnalysisSource) -> some View {
+        Text(L10n.string(sourceLabel(source)))
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(source == .systemInferred ? Color.accentColor : Color.secondary)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background((source == .systemInferred ? Color.accentColor : Color.secondary).opacity(0.12),
+                        in: Capsule())
+    }
+
+    private func sourceLabel(_ source: UTTypeAnalysisSource) -> String {
+        switch source {
+        case .systemInferred: "系统推测类型"
+        case .tagMatched: "系统标签匹配"
+        case .actualFile: "实际文件识别"
+        }
+    }
+
+    private func sourceDescription(_ source: UTTypeAnalysisSource) -> String {
+        switch source {
+        case .systemInferred: "这是普通界面按扩展名使用的操作目标。"
+        case .tagMatched: "这是系统按扩展名标签匹配到的其他 UTType。"
+        case .actualFile: "这是 macOS 从这个实际文件识别出的 UTType。"
+        }
     }
 
     @ViewBuilder private func riskBadge(_ risk: FileTypeModificationRisk) -> some View {
@@ -271,14 +314,25 @@ struct AdvancedFeaturesView: View {
         guard !ext.isEmpty else { return }
         extensionQuery = ext
         analyzedExtension = ext
-        let types = store.registeredFileTypes(forExtension: ext)
-        store.refreshDefaults(for: types)
-        analyses = types.compactMap(makeAnalysis)
+        var types: [(FileTypeInfo, UTTypeAnalysisSource)] = []
+        if let inferred = store.inferredFileType(forExtension: ext) {
+            types.append((inferred, .systemInferred))
+        }
+        types += store.registeredFileTypes(forExtension: ext)
+            .filter { candidate in
+                !types.contains { $0.0.contentTypeIdentifier == candidate.contentTypeIdentifier }
+            }
+            .map { ($0, .tagMatched) }
+        store.refreshDefaults(for: types.map(\.0))
+        analyses = types.compactMap { makeAnalysis(for: $0.0, source: $0.1) }
     }
 
-    private func makeAnalysis(for fileType: FileTypeInfo) -> UTTypeAnalysis? {
+    private func makeAnalysis(for fileType: FileTypeInfo,
+                              source: UTTypeAnalysisSource = .actualFile) -> UTTypeAnalysis? {
         guard let type = UTType(fileType.contentTypeIdentifier) else { return nil }
+        let capableAppCount = store.capableApplications(for: fileType).count
         return UTTypeAnalysis(
+            fileType: fileType,
             identifier: type.identifier,
             displayName: type.localizedDescription ?? fileType.specificDisplayName,
             extensions: type.tags[.filenameExtension]?.map { "." + $0 }.joined(separator: ", ")
@@ -286,8 +340,12 @@ struct AdvancedFeaturesView: View {
             mimeTypes: type.tags[.mimeType]?.joined(separator: ", ") ?? "—",
             defaultApplicationName: store.defaultApplication(for: fileType)?.name ?? L10n.string("未设置"),
             defaultApplicationBundleID: store.defaultApplication(for: fileType)?.bundleIdentifier,
-            capableAppCount: store.capableApplications(for: fileType).count,
-            risk: store.modificationRisk(for: fileType)
+            capableAppCount: capableAppCount,
+            risk: store.modificationRisk(for: fileType),
+            source: source,
+            canChange: capableAppCount > 0
+                && store.modificationRisk(for: fileType) != .protected
+                && (source != .tagMatched || !type.isDynamic)
         )
     }
 
@@ -319,7 +377,7 @@ struct AdvancedFeaturesView: View {
                                         contentTypeIdentifier: type.identifier,
                                         displayName: type.localizedDescription ?? type.identifier)
             store.refreshDefaults(for: [fileType])
-            guard let analysis = makeAnalysis(for: fileType) else {
+            guard let analysis = makeAnalysis(for: fileType, source: .actualFile) else {
                 throw AdvancedInspectionError.noContentType
             }
             let actualURL = NSWorkspace.shared.urlForApplication(toOpen: url)
@@ -348,6 +406,7 @@ private enum AdvancedMode: Hashable {
 }
 
 private struct UTTypeAnalysis: Identifiable {
+    let fileType: FileTypeInfo
     let identifier: String
     let displayName: String
     let extensions: String
@@ -356,7 +415,16 @@ private struct UTTypeAnalysis: Identifiable {
     let defaultApplicationBundleID: String?
     let capableAppCount: Int
     let risk: FileTypeModificationRisk
+    let source: UTTypeAnalysisSource
+    let canChange: Bool
+    var isSystemInferred: Bool { source == .systemInferred }
     var id: String { identifier }
+}
+
+private enum UTTypeAnalysisSource {
+    case systemInferred
+    case tagMatched
+    case actualFile
 }
 
 private struct InspectedFile {

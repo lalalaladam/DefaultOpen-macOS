@@ -8,7 +8,16 @@ struct AppScanner: Sendable {
     }
 
     func scanDeclaredFileTypes() -> [SupportedType] {
-        let types = scanApplicationBundles().flatMap(\.supportedTypes)
+        let types = scanApplicationBundles().flatMap { application in
+            application.documentTypes.flatMap { document in
+                document.extensions.compactMap { ext -> SupportedType? in
+                    guard let type = UTType(filenameExtension: ext) else { return nil }
+                    return SupportedType(contentTypeIdentifier: type.identifier,
+                                         extensions: [ext],
+                                         displayName: document.name)
+                }
+            }
+        }
         return Dictionary(grouping: types, by: \SupportedType.id).compactMap(\.value.first)
     }
 
@@ -108,7 +117,26 @@ struct AppScanner: Sendable {
                     merged[type.contentTypeIdentifier] = type
                 }
             }
+            let supplementalDocuments: [ApplicationDocumentType] = inferred[
+                app.bundleIdentifier, default: []
+            ].compactMap { type -> ApplicationDocumentType? in
+                guard !app.documentTypes.contains(where: {
+                    $0.extensions.contains(where: type.extensions.contains)
+                        || $0.declaredTypeIdentifiers.contains(type.contentTypeIdentifier)
+                }) else { return nil }
+                return ApplicationDocumentType(
+                    id: "launch-services:\(type.contentTypeIdentifier)",
+                    name: type.displayName,
+                    extensions: type.extensions,
+                    mimeTypes: [],
+                    declaredTypeIdentifiers: [],
+                    role: "—",
+                    handlerRank: nil,
+                    source: .launchServices
+                )
+            }
             return ApplicationInfo(bundleIdentifier: app.bundleIdentifier, name: app.name, url: app.url,
+                                   documentTypes: app.documentTypes + supplementalDocuments,
                                    supportedTypes: merged.values.sorted {
                 $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
             }, searchAliases: app.searchAliases)
@@ -134,8 +162,10 @@ struct AppScanner: Sendable {
             .replacingOccurrences(of: ".app", with: "", options: [.anchored, .backwards])
         let name = localName.isEmpty ? fallbackName : localName
         let aliases = applicationNameAliases(bundle: bundle, url: url, info: info, displayName: name)
-        let types = parseDocumentTypes(info: info)
+        let documents = parseDocumentTypes(info: info)
+        let types = supportedTypes(from: documents, info: info)
         return ApplicationInfo(bundleIdentifier: bundleID, name: name, url: url,
+                               documentTypes: documents,
                                supportedTypes: types, searchAliases: aliases)
     }
 
@@ -146,7 +176,33 @@ struct AppScanner: Sendable {
             .map { $0.lowercased() })
     }
 
-    private func parseDocumentTypes(info: [String: Any]) -> [SupportedType] {
+    private func parseDocumentTypes(info: [String: Any]) -> [ApplicationDocumentType] {
+        var result: [ApplicationDocumentType] = []
+        for (index, document) in ((info["CFBundleDocumentTypes"] as? [[String: Any]]) ?? []).enumerated() {
+            guard isUsableDocumentType(document) else { continue }
+            let identifiers = stringArray(document["LSItemContentTypes"])
+            let extensions = normalize(stringArray(document["CFBundleTypeExtensions"]))
+            let mimeTypes = stringArray(document["CFBundleTypeMIMETypes"])
+            let name = (document["CFBundleTypeName"] as? String)
+                ?? extensions.first.map { $0.uppercased() }
+                ?? identifiers.first
+                ?? "Document"
+            result.append(ApplicationDocumentType(
+                id: "bundle:\(index)",
+                name: name,
+                extensions: extensions,
+                mimeTypes: mimeTypes,
+                declaredTypeIdentifiers: identifiers,
+                role: (document["CFBundleTypeRole"] as? String) ?? "None",
+                handlerRank: document["LSHandlerRank"] as? String,
+                source: .bundleDeclaration
+            ))
+        }
+        return result
+    }
+
+    private func supportedTypes(from documents: [ApplicationDocumentType],
+                                info: [String: Any]) -> [SupportedType] {
         var result: [SupportedType] = []
         let declarations = ((info["UTExportedTypeDeclarations"] as? [[String: Any]]) ?? [])
             + ((info["UTImportedTypeDeclarations"] as? [[String: Any]]) ?? [])
@@ -157,30 +213,24 @@ struct AppScanner: Sendable {
             declaredExtensions[identifier] = stringArray(tags?["public.filename-extension"])
         }
 
-        for document in (info["CFBundleDocumentTypes"] as? [[String: Any]]) ?? [] {
-            guard isUsableDocumentType(document) else { continue }
-            let identifiers = stringArray(document["LSItemContentTypes"])
-            let legacyExtensions = stringArray(document["CFBundleTypeExtensions"])
-            let declaredName = document["CFBundleTypeName"] as? String
-
-            for identifier in identifiers {
+        for document in documents {
+            for identifier in document.declaredTypeIdentifiers {
                 let type = UTType(identifier)
                 let extensions = (declaredExtensions[identifier] ?? [])
                     + preferredExtensions(for: type)
-                    + legacyExtensions
                 result.append(SupportedType(
                     contentTypeIdentifier: identifier,
                     extensions: normalize(extensions),
-                    displayName: declaredName ?? type?.localizedDescription ?? identifier
+                    displayName: document.name
                 ))
             }
-            if identifiers.isEmpty {
-                for ext in legacyExtensions where ext != "*" {
+            if document.declaredTypeIdentifiers.isEmpty {
+                for ext in document.extensions {
                     guard let type = UTType(filenameExtension: ext) else { continue }
                     result.append(SupportedType(
                         contentTypeIdentifier: type.identifier,
                         extensions: [ext.lowercased()],
-                        displayName: declaredName ?? type.localizedDescription ?? type.identifier
+                        displayName: document.name
                     ))
                 }
             }
@@ -197,7 +247,7 @@ struct AppScanner: Sendable {
     private func isUsableDocumentType(_ document: [String: Any]) -> Bool {
         let role = (document["CFBundleTypeRole"] as? String)?.lowercased()
         let rank = (document["LSHandlerRank"] as? String)?.lowercased()
-        return role != "none" && rank != "none"
+        return role != "none" && role != "qlgenerator" && rank != "none"
     }
 
     private func merging(_ inferredType: SupportedType,
@@ -219,6 +269,7 @@ struct AppScanner: Sendable {
             bundleIdentifier: application.bundleIdentifier,
             name: application.name,
             url: application.url,
+            documentTypes: application.documentTypes,
             supportedTypes: types.sorted {
                 $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
             },
