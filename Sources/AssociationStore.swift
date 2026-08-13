@@ -20,15 +20,18 @@ final class AssociationStore: ObservableObject {
     private let savedKey = "managedExtensions"
     private let customDefaultAppCategoriesKey = "customDefaultAppCategories"
     private let ignoredDefaultAppTypesKey = "ignoredDefaultAppTypesByCategory"
+    private let includedDefaultAppTypesKey = "includedDefaultAppTypesByCategory"
     private let starterExtensions = ["pdf", "txt", "md", "jpg", "png", "heic", "svg", "zip", "json", "csv", "docx", "xlsx", "pptx", "html", "mp3", "mp4"]
     private var optimisticDefaultAppStatuses: [String: DefaultAppCategoryStatus] = [:]
     private var queriedApplicationExtensions = Set<String>()
     private var queriedDefaultContentTypes = Set<String>()
     private var registeredFileTypesByExtension: [String: [FileTypeInfo]] = [:]
     private var ignoredDefaultAppTypesByCategory: [String: Set<String>]
+    private var includedDefaultAppTypesByCategory: [String: Set<String>]
 
     init() {
         ignoredDefaultAppTypesByCategory = Self.loadIgnoredDefaultAppTypes()
+        includedDefaultAppTypesByCategory = Self.loadIncludedDefaultAppTypes()
         customDefaultAppCategories = Self.loadCustomDefaultAppCategories()
         let saved = customExtensionNames
         fileTypes = (starterExtensions + saved).uniqued().compactMap { try? launchServices.fileType(for: $0) }
@@ -76,7 +79,7 @@ final class AssociationStore: ObservableObject {
             customDefaultAppCategories.append(category)
         }
         persistCustomDefaultAppCategories()
-        pruneIgnoredDefaultAppTypes(for: category)
+        pruneDefaultAppTypePolicies(for: category)
         removeOptimisticDefaultAppStatuses(for: category)
         defaultAppRevision += 1
         return true
@@ -90,7 +93,9 @@ final class AssociationStore: ObservableObject {
         guard category.isCustom else { return }
         customDefaultAppCategories.removeAll { $0.id == category.id }
         ignoredDefaultAppTypesByCategory.removeValue(forKey: category.id)
+        includedDefaultAppTypesByCategory.removeValue(forKey: category.id)
         persistIgnoredDefaultAppTypes()
+        persistIncludedDefaultAppTypes()
         removeOptimisticDefaultAppStatuses(for: category)
         persistCustomDefaultAppCategories()
         defaultAppRevision += 1
@@ -277,7 +282,7 @@ final class AssociationStore: ObservableObject {
     func broadTypeIdentifiers(for category: DefaultAppCategory,
                               includingOptional: Bool) -> [String] {
         resolvedFileTypes(for: category, includingOptional: includingOptional)
-            .filter { !isDefaultAppTypeIgnored($0.contentTypeIdentifier, for: category) }
+            .filter { isDefaultAppTypeManaged($0.contentTypeIdentifier, for: category) }
             .filter { modificationRisk(for: $0) == .broad }
             .map(\.contentTypeIdentifier)
             .uniqued().sorted()
@@ -356,27 +361,36 @@ final class AssociationStore: ObservableObject {
             let typeName: String
             let identifier: String
             let risk: FileTypeModificationRisk
-            let canBeIgnored: Bool
+            let canCustomizeScope: Bool
+            let isAutomaticallyManaged: Bool
             switch target.kind {
             case .urlScheme(let scheme):
                 typeName = L10n.string("网页链接")
                 identifier = scheme.lowercased()
                 risk = .normal
-                canBeIgnored = false
+                canCustomizeScope = false
+                isAutomaticallyManaged = true
             case .fileType(let type):
                 typeName = type.specificDisplayName
                 identifier = type.contentTypeIdentifier
                 risk = modificationRisk(for: type)
-                canBeIgnored = true
+                canCustomizeScope = true
+                isAutomaticallyManaged = isAutomaticallyManagedDefaultAppType(
+                    identifier,
+                    for: category
+                )
             }
+            let scopePolicy = defaultAppTypeScopePolicy(identifier, for: category)
             return DefaultAppCategoryTypeDetail(
                 id: target.key,
                 label: target.label,
                 typeName: typeName,
                 technicalIdentifier: identifier,
                 modificationRisk: risk,
-                canBeIgnored: canBeIgnored,
-                isIgnored: canBeIgnored && isDefaultAppTypeIgnored(identifier, for: category)
+                canCustomizeScope: canCustomizeScope,
+                scopePolicy: scopePolicy,
+                isAutomaticallyManaged: isAutomaticallyManaged,
+                isManaged: !canCustomizeScope || isDefaultAppTypeManaged(identifier, for: category)
             )
         }
     }
@@ -483,7 +497,7 @@ final class AssociationStore: ObservableObject {
             }
 
             for type in resolvedFileTypes(for: category, includingOptional: includingOptional)
-                where !isDefaultAppTypeIgnored(type.contentTypeIdentifier, for: category) {
+                where isDefaultAppTypeManaged(type.contentTypeIdentifier, for: category) {
                 if modificationRisk(for: type) == .protected {
                     skippedTargets.append(type.dottedExtension)
                     continue
@@ -523,7 +537,7 @@ final class AssociationStore: ObservableObject {
             let statusKey = defaultAppStatusKey(for: category, includingOptional: includingOptional)
             let selectedLabels = defaultAppTargets(for: category, includingOptional: includingOptional,
                                                    includeCapabilities: false)
-                .filter { !isDefaultAppTargetIgnored($0, for: category) }
+                .filter { isDefaultAppTargetManaged($0, for: category) }
                 .map(\.label).uniqued()
             let ignoredCount = ignoredTypeCount(
                 in: defaultAppTargets(for: category, includingOptional: includingOptional,
@@ -720,26 +734,50 @@ final class AssociationStore: ObservableObject {
         return raw.mapValues(Set.init)
     }
 
+    private static func loadIncludedDefaultAppTypes() -> [String: Set<String>] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: "includedDefaultAppTypesByCategory")
+                as? [String: [String]] else { return [:] }
+        return raw.mapValues(Set.init)
+    }
+
     private func persistIgnoredDefaultAppTypes() {
         let raw = ignoredDefaultAppTypesByCategory.mapValues { Array($0).sorted() }
         UserDefaults.standard.set(raw, forKey: ignoredDefaultAppTypesKey)
     }
 
-    private func pruneIgnoredDefaultAppTypes(for category: DefaultAppCategory) {
-        guard let ignored = ignoredDefaultAppTypesByCategory[category.id] else { return }
-        let valid = Set(registeredFileTypes(forExtensions: category.coreExtensions)
+    private func persistIncludedDefaultAppTypes() {
+        let raw = includedDefaultAppTypesByCategory.mapValues { Array($0).sorted() }
+        UserDefaults.standard.set(raw, forKey: includedDefaultAppTypesKey)
+    }
+
+    private func pruneDefaultAppTypePolicies(for category: DefaultAppCategory) {
+        let valid = Set(candidateFileTypes(forExtensions: category.coreExtensions)
             .map(\.contentTypeIdentifier))
-        let retained = ignored.intersection(valid)
-        if retained.isEmpty {
-            ignoredDefaultAppTypesByCategory.removeValue(forKey: category.id)
-        } else {
-            ignoredDefaultAppTypesByCategory[category.id] = retained
+        if let ignored = ignoredDefaultAppTypesByCategory[category.id] {
+            let retained = ignored.intersection(valid)
+            if retained.isEmpty {
+                ignoredDefaultAppTypesByCategory.removeValue(forKey: category.id)
+            } else {
+                ignoredDefaultAppTypesByCategory[category.id] = retained
+            }
+        }
+        if let included = includedDefaultAppTypesByCategory[category.id] {
+            let retained = included.intersection(valid)
+            if retained.isEmpty {
+                includedDefaultAppTypesByCategory.removeValue(forKey: category.id)
+            } else {
+                includedDefaultAppTypesByCategory[category.id] = retained
+            }
         }
         persistIgnoredDefaultAppTypes()
+        persistIncludedDefaultAppTypes()
     }
 
     private func mergeIntoFileTypeCatalog(_ types: [FileTypeInfo]) {
-        allFileTypes = Dictionary(grouping: allFileTypes + types, by: \FileTypeInfo.id)
+        let inferredTypes = types.map { type in
+            (try? launchServices.fileType(for: type.extensionName)) ?? type
+        }
+        allFileTypes = Dictionary(grouping: allFileTypes + inferredTypes, by: \FileTypeInfo.id)
             .compactMap(\.value.first)
             .sorted { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
     }
@@ -782,9 +820,20 @@ final class AssociationStore: ObservableObject {
 
     private func resolvedFileTypes(for category: DefaultAppCategory,
                                    includingOptional: Bool) -> [FileTypeInfo] {
-        let types = category.extensions(includingOptional: includingOptional)
-            .flatMap { (try? launchServices.fileTypes(for: $0)) ?? [] }
+        let types = candidateFileTypes(
+            forExtensions: category.extensions(includingOptional: includingOptional)
+        )
         return Dictionary(grouping: types, by: \FileTypeInfo.contentTypeIdentifier).compactMap(\.value.first)
+    }
+
+    private func candidateFileTypes(forExtensions extensions: [String]) -> [FileTypeInfo] {
+        extensions.flatMap { ext in
+            var types: [FileTypeInfo] = []
+            if let inferred = try? launchServices.fileType(for: ext) { types.append(inferred) }
+            types += (try? launchServices.fileTypes(for: ext)) ?? []
+            return Dictionary(grouping: types, by: \.contentTypeIdentifier)
+                .compactMap(\.value.first)
+        }
     }
 
     private func defaultAppTargets(for category: DefaultAppCategory,
@@ -800,7 +849,7 @@ final class AssociationStore: ObservableObject {
 
         let extensions = category.extensions(includingOptional: includingOptional)
         let resolved = extensions.flatMap { ext in
-            ((try? launchServices.fileTypes(for: ext)) ?? []).map { (ext, $0) }
+            candidateFileTypes(forExtensions: [ext]).map { (ext, $0) }
         }
         var order: [String] = []
         var typeByIdentifier: [String: FileTypeInfo] = [:]
@@ -842,17 +891,21 @@ final class AssociationStore: ObservableObject {
                                      category: DefaultAppCategory) -> DefaultAppCandidateTypeDetail {
         let typeName: String
         let identifier: String
-        let canBeIgnored: Bool
+        let canCustomizeScope: Bool
+        let isAutomaticallyManaged: Bool
         switch target.kind {
         case .urlScheme(let scheme):
             typeName = L10n.string("网页链接")
             identifier = scheme.lowercased()
-            canBeIgnored = false
+            canCustomizeScope = false
+            isAutomaticallyManaged = true
         case .fileType(let type):
             typeName = type.specificDisplayName
             identifier = type.contentTypeIdentifier
-            canBeIgnored = true
+            canCustomizeScope = true
+            isAutomaticallyManaged = isAutomaticallyManagedDefaultAppType(identifier, for: category)
         }
+        let scopePolicy = defaultAppTypeScopePolicy(identifier, for: category)
         return DefaultAppCandidateTypeDetail(
             id: target.key,
             label: target.label,
@@ -860,34 +913,52 @@ final class AssociationStore: ObservableObject {
             technicalIdentifier: identifier,
             isSupported: applicationSupports(application, target: target),
             isCurrentDefault: target.defaultApplication?.bundleIdentifier == application.bundleIdentifier,
-            canBeIgnored: canBeIgnored,
-            isIgnored: canBeIgnored && isDefaultAppTypeIgnored(identifier, for: category)
+            canCustomizeScope: canCustomizeScope,
+            scopePolicy: scopePolicy,
+            isAutomaticallyManaged: isAutomaticallyManaged,
+            isManaged: !canCustomizeScope || isDefaultAppTypeManaged(identifier, for: category)
         )
     }
 
-    func setDefaultAppType(_ identifier: String, ignored: Bool,
+    func setDefaultAppType(_ identifier: String, scopePolicy: DefaultAppTypeScopePolicy,
                            for category: DefaultAppCategory) {
-        if ignored {
-            ignoredDefaultAppTypesByCategory[category.id, default: []].insert(identifier)
-        } else {
+        switch scopePolicy {
+        case .automatic:
             ignoredDefaultAppTypesByCategory[category.id]?.remove(identifier)
-            if ignoredDefaultAppTypesByCategory[category.id]?.isEmpty == true {
-                ignoredDefaultAppTypesByCategory.removeValue(forKey: category.id)
-            }
+            includedDefaultAppTypesByCategory[category.id]?.remove(identifier)
+        case .included:
+            ignoredDefaultAppTypesByCategory[category.id]?.remove(identifier)
+            includedDefaultAppTypesByCategory[category.id, default: []].insert(identifier)
+        case .excluded:
+            includedDefaultAppTypesByCategory[category.id]?.remove(identifier)
+            ignoredDefaultAppTypesByCategory[category.id, default: []].insert(identifier)
+        }
+        if ignoredDefaultAppTypesByCategory[category.id]?.isEmpty == true {
+            ignoredDefaultAppTypesByCategory.removeValue(forKey: category.id)
+        }
+        if includedDefaultAppTypesByCategory[category.id]?.isEmpty == true {
+            includedDefaultAppTypesByCategory.removeValue(forKey: category.id)
         }
         persistIgnoredDefaultAppTypes()
+        persistIncludedDefaultAppTypes()
         removeOptimisticDefaultAppStatuses(for: category)
         defaultAppRevision += 1
     }
 
     private func managedDefaultAppTargets(_ targets: [DefaultAppTarget],
                                           for category: DefaultAppCategory) -> [DefaultAppTarget] {
-        targets.filter { !isDefaultAppTargetIgnored($0, for: category) }
+        targets.filter { isDefaultAppTargetManaged($0, for: category) }
     }
 
     private func ignoredTypeCount(in targets: [DefaultAppTarget],
                                   for category: DefaultAppCategory) -> Int {
         targets.filter { isDefaultAppTargetIgnored($0, for: category) }.count
+    }
+
+    private func isDefaultAppTargetManaged(_ target: DefaultAppTarget,
+                                           for category: DefaultAppCategory) -> Bool {
+        guard case .fileType(let type) = target.kind else { return true }
+        return isDefaultAppTypeManaged(type.contentTypeIdentifier, for: category)
     }
 
     private func isDefaultAppTargetIgnored(_ target: DefaultAppTarget,
@@ -899,6 +970,31 @@ final class AssociationStore: ObservableObject {
     private func isDefaultAppTypeIgnored(_ identifier: String,
                                          for category: DefaultAppCategory) -> Bool {
         ignoredDefaultAppTypesByCategory[category.id]?.contains(identifier) == true
+    }
+
+    private func defaultAppTypeScopePolicy(_ identifier: String,
+                                           for category: DefaultAppCategory) -> DefaultAppTypeScopePolicy {
+        if isDefaultAppTypeIgnored(identifier, for: category) { return .excluded }
+        if includedDefaultAppTypesByCategory[category.id]?.contains(identifier) == true {
+            return .included
+        }
+        return .automatic
+    }
+
+    private func isDefaultAppTypeManaged(_ identifier: String,
+                                         for category: DefaultAppCategory) -> Bool {
+        switch defaultAppTypeScopePolicy(identifier, for: category) {
+        case .included: return true
+        case .excluded: return false
+        case .automatic: return isAutomaticallyManagedDefaultAppType(identifier, for: category)
+        }
+    }
+
+    private func isAutomaticallyManagedDefaultAppType(_ identifier: String,
+                                                       for category: DefaultAppCategory) -> Bool {
+        category.extensions(includingOptional: true).contains { extensionName in
+            (try? launchServices.fileType(for: extensionName))?.contentTypeIdentifier == identifier
+        }
     }
 
     private func applicationSupports(_ application: ApplicationInfo, urlScheme: String) -> Bool {

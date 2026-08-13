@@ -695,7 +695,7 @@ private struct DefaultAppPickerSheet: View {
 
     private var hasSettableTargets: Bool {
         categoryTypeDetails.contains {
-            !$0.isIgnored && $0.modificationRisk != .protected
+            $0.isManaged && $0.modificationRisk != .protected
         }
     }
 
@@ -952,15 +952,15 @@ private struct DefaultAppPickerSheet: View {
                 Text(L10n.format("picker.setCategory", candidate.application.name, category.title))
                     .font(.headline)
                 let managedSupportedTargets = candidate.typeDetails.filter {
-                    $0.isSupported && !$0.isIgnored
+                    $0.isSupported && $0.isManaged
                 }.map(\.label).uniquedPreservingOrder()
                 let managedUnsupportedTargets = candidate.typeDetails.filter {
-                    !$0.isSupported && !$0.isIgnored
+                    !$0.isSupported && $0.isManaged
                 }.map(\.label).uniquedPreservingOrder()
                 Text(L10n.format("picker.willChange", managedSupportedTargets.joined(separator: L10n.string("list.separator"))))
                     .font(.callout).foregroundStyle(.secondary)
                 let estimatedChanges = candidate.typeDetails.filter {
-                    $0.isSupported && !$0.isCurrentDefault && !$0.isIgnored
+                    $0.isSupported && !$0.isCurrentDefault && $0.isManaged
                 }.count
                 Text(L10n.format("picker.estimatedChanges", estimatedChanges))
                     .font(.caption).foregroundStyle(.secondary)
@@ -1001,9 +1001,9 @@ private struct DefaultAppPickerSheet: View {
 
     private func typeDetailRow(_ detail: DefaultAppCandidateTypeDetail) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: detail.isIgnored ? "eye.slash.fill"
+            Image(systemName: !detail.isManaged ? "minus.circle.fill"
                   : detail.isSupported ? "checkmark.circle.fill" : "minus.circle.fill")
-                .foregroundStyle(detail.isIgnored ? Color.secondary
+                .foregroundStyle(!detail.isManaged ? Color.secondary
                                  : detail.isSupported ? Color.green : Color.orange)
             Text(detail.label).font(.callout.monospaced())
                 .frame(width: 70, alignment: .leading)
@@ -1018,8 +1018,10 @@ private struct DefaultAppPickerSheet: View {
                 if detail.isCurrentDefault {
                     Text(L10n.string("当前默认")).font(.caption).foregroundStyle(.green)
                 }
-                if detail.isIgnored {
-                    Text(L10n.string("此组合已忽略")).font(.caption).foregroundStyle(.secondary)
+                if !detail.isManaged {
+                    Text(L10n.string(detail.scopePolicy == .excluded
+                                     ? "已排除此类型" : "候选类型 · 默认不纳入"))
+                        .font(.caption).foregroundStyle(.secondary)
                 } else if !detail.isSupported {
                     Text(L10n.string("不会修改")).font(.caption).foregroundStyle(.orange)
                 }
@@ -1056,7 +1058,7 @@ private struct DefaultAppPickerSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(selectedCandidate?.typeDetails.contains(where: {
-                $0.isSupported && !$0.isIgnored
+                $0.isSupported && $0.isManaged
             }) != true || !hasSettableTargets || isApplying)
         }
         .padding(16)
@@ -1160,7 +1162,7 @@ private struct DefaultAppCategoryTypeDetailsSheet: View {
     }
 
     private var managedCount: Int {
-        details.filter { !$0.isIgnored && $0.modificationRisk != .protected }.count
+        details.filter { $0.isManaged && $0.modificationRisk != .protected }.count
     }
 
     var body: some View {
@@ -1178,8 +1180,8 @@ private struct DefaultAppCategoryTypeDetailsSheet: View {
 
             Divider()
             VStack(alignment: .leading, spacing: 5) {
-                Text(L10n.string("这里的忽略设置属于整个组合，与选择哪个 App 无关。"))
-                Text(L10n.string("忽略后，此组合不会修改或检查该文件类型的默认 App。"))
+                Text(L10n.string("系统推测类型会自动纳入；其他注册候选默认不纳入。"))
+                Text(L10n.string("可以为整个组合手动纳入或排除某个类型，与选择哪个 App 无关。"))
                     .foregroundStyle(.secondary)
                 if managedCount == 0 {
                     Label(L10n.string("当前没有可设置的文件类型。"),
@@ -1208,15 +1210,28 @@ private struct DefaultAppCategoryTypeDetailsSheet: View {
                     }
                     Spacer()
                     riskLabel(for: detail)
-                    if detail.canBeIgnored {
-                        Button(L10n.string(detail.isIgnored
-                                         ? "重新纳入此组合" : "从此组合中忽略")) {
-                            store.setDefaultAppType(detail.technicalIdentifier,
-                                                    ignored: !detail.isIgnored,
-                                                    for: category)
+                    if detail.canCustomizeScope {
+                        Menu {
+                            Button(L10n.string("使用自动范围")) {
+                                store.setDefaultAppType(detail.technicalIdentifier,
+                                                        scopePolicy: .automatic,
+                                                        for: category)
+                            }
+                            Button(L10n.string("手动纳入组合")) {
+                                store.setDefaultAppType(detail.technicalIdentifier,
+                                                        scopePolicy: .included,
+                                                        for: category)
+                            }
+                            Button(L10n.string("从组合中排除")) {
+                                store.setDefaultAppType(detail.technicalIdentifier,
+                                                        scopePolicy: .excluded,
+                                                        for: category)
+                            }
+                        } label: {
+                            Text(scopeLabel(for: detail))
                         }
-                        .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .frame(width: 130, alignment: .trailing)
                     }
                 }
                 .padding(.vertical, 4)
@@ -1238,25 +1253,42 @@ private struct DefaultAppCategoryTypeDetailsSheet: View {
     }
 
     private func iconName(for detail: DefaultAppCategoryTypeDetail) -> String {
-        if detail.isIgnored { return "eye.slash.fill" }
+        if !detail.isManaged { return "minus.circle.fill" }
         if detail.modificationRisk == .protected { return "lock.fill" }
         if detail.modificationRisk == .broad { return "exclamationmark.triangle.fill" }
         return "checkmark.circle.fill"
     }
 
     private func iconColor(for detail: DefaultAppCategoryTypeDetail) -> Color {
-        if detail.isIgnored { return .secondary }
+        if !detail.isManaged { return .secondary }
         if detail.modificationRisk != .normal { return .orange }
         return .green
     }
 
     @ViewBuilder private func riskLabel(for detail: DefaultAppCategoryTypeDetail) -> some View {
-        if detail.isIgnored {
-            Text(L10n.string("已忽略")).font(.caption).foregroundStyle(.secondary)
+        if detail.scopePolicy == .excluded {
+            Text(L10n.string("已排除")).font(.caption).foregroundStyle(.secondary)
+        } else if detail.scopePolicy == .included {
+            Text(L10n.string("手动纳入")).font(.caption).foregroundStyle(.blue)
+        } else if detail.isAutomaticallyManaged {
+            Text(L10n.string("系统推测")).font(.caption).foregroundStyle(.green)
+        } else if !detail.isManaged {
+            Text(L10n.string("注册候选")).font(.caption).foregroundStyle(.secondary)
         } else if detail.modificationRisk == .protected {
             Text(L10n.string("只读基础类型")).font(.caption).foregroundStyle(.orange)
         } else if detail.modificationRisk == .broad {
             Text(L10n.string("宽泛类型")).font(.caption).foregroundStyle(.orange)
+        }
+    }
+
+    private func scopeLabel(for detail: DefaultAppCategoryTypeDetail) -> String {
+        switch detail.scopePolicy {
+        case .automatic:
+            L10n.string(detail.isAutomaticallyManaged ? "自动纳入" : "默认不纳入")
+        case .included:
+            L10n.string("手动纳入")
+        case .excluded:
+            L10n.string("已排除")
         }
     }
 }

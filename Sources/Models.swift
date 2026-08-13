@@ -155,6 +155,12 @@ struct DefaultAppCandidate: Identifiable {
     var id: String { application.id }
 }
 
+enum DefaultAppTypeScopePolicy: Equatable {
+    case automatic
+    case included
+    case excluded
+}
+
 struct DefaultAppCandidateTypeDetail: Identifiable {
     let id: String
     let label: String
@@ -162,8 +168,10 @@ struct DefaultAppCandidateTypeDetail: Identifiable {
     let technicalIdentifier: String
     let isSupported: Bool
     let isCurrentDefault: Bool
-    let canBeIgnored: Bool
-    let isIgnored: Bool
+    let canCustomizeScope: Bool
+    let scopePolicy: DefaultAppTypeScopePolicy
+    let isAutomaticallyManaged: Bool
+    let isManaged: Bool
 }
 
 struct DefaultAppCategoryTypeDetail: Identifiable {
@@ -172,8 +180,10 @@ struct DefaultAppCategoryTypeDetail: Identifiable {
     let typeName: String
     let technicalIdentifier: String
     let modificationRisk: FileTypeModificationRisk
-    let canBeIgnored: Bool
-    let isIgnored: Bool
+    let canCustomizeScope: Bool
+    let scopePolicy: DefaultAppTypeScopePolicy
+    let isAutomaticallyManaged: Bool
+    let isManaged: Bool
 }
 
 struct DefaultAppChangeResult {

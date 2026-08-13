@@ -26,10 +26,7 @@ enum AssociationError: LocalizedError {
 
 struct LaunchServicesClient: Sendable {
     func fileTypes(for rawExtension: String) throws -> [FileTypeInfo] {
-        let ext = rawExtension.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            .lowercased()
-        guard !ext.isEmpty else { throw AssociationError.invalidExtension(rawExtension) }
+        let ext = try normalizedExtension(rawExtension)
 
         var types = UTType.types(
             tag: ext,
@@ -53,10 +50,23 @@ struct LaunchServicesClient: Sendable {
     }
 
     func fileType(for rawExtension: String) throws -> FileTypeInfo {
-        guard let representative = try fileTypes(for: rawExtension).first else {
+        let ext = try normalizedExtension(rawExtension)
+        guard let type = UTType(filenameExtension: ext) else {
             throw AssociationError.invalidExtension(rawExtension)
         }
-        return representative
+        return FileTypeInfo(
+            extensionName: ext,
+            contentTypeIdentifier: type.identifier,
+            displayName: type.localizedDescription ?? type.identifier
+        )
+    }
+
+    private func normalizedExtension(_ rawExtension: String) throws -> String {
+        let ext = rawExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        guard !ext.isEmpty else { throw AssociationError.invalidExtension(rawExtension) }
+        return ext
     }
 
     func defaultApplication(for type: FileTypeInfo) -> ApplicationInfo? {
