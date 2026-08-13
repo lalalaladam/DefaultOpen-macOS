@@ -560,11 +560,30 @@ private struct FileTypeAssociationDetailsSheet: View {
                             Text(L10n.string("主列表显示"))
                                 .font(.headline)
                             associationRow(displayedEntry, showsIdentifier: true)
-                                .padding(12)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 12)
                                 .background(.primary.opacity(0.055),
                                             in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.string("注册文件类型"))
+                            .font(.headline)
+                        VStack(spacing: 0) {
+                            ForEach(details.entries) { entry in
+                                associationRow(entry, showsIdentifier: true)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 9)
+                                if entry.id != details.entries.last?.id { Divider() }
+                            }
+                        }
+                    }
+
+                    RegisteredUTTypeRelationshipsView(
+                        identifiers: details.entries.map { $0.type.contentTypeIdentifier },
+                        representativeIdentifier: details.representative.contentTypeIdentifier
+                    )
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text(L10n.string("按默认 App 汇总"))
@@ -578,18 +597,6 @@ private struct FileTypeAssociationDetailsSheet: View {
                                     .foregroundStyle(.secondary)
                             }
                             .padding(.vertical, 3)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(L10n.string("注册文件类型"))
-                            .font(.headline)
-                        VStack(spacing: 0) {
-                            ForEach(details.entries) { entry in
-                                associationRow(entry, showsIdentifier: true)
-                                    .padding(.vertical, 9)
-                                if entry.id != details.entries.last?.id { Divider() }
-                            }
                         }
                     }
                 }
@@ -606,7 +613,7 @@ private struct FileTypeAssociationDetailsSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 620, height: 540)
+        .frame(width: 720, height: 620)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
         .onAppear {
             store.refreshDefaults(for: details.entries.map(\.type))
@@ -644,13 +651,18 @@ private struct FileTypeAssociationDetailsSheet: View {
                 .frame(width: 125, alignment: .leading)
                 .foregroundStyle(application == nil ? .secondary : .primary)
             let risk = store.modificationRisk(for: entry.type)
-            if risk != .normal {
-                Image(systemName: risk == .protected ? "lock.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .help(L10n.string(risk == .protected
-                                      ? "这是基础 UTType，仅供查看，不能修改默认 App。"
-                                      : "这是较宽泛的 UTType，修改可能影响其他扩展名。"))
+            ZStack {
+                if risk != .normal {
+                    Image(systemName: risk == .protected
+                          ? "lock.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .help(L10n.string(risk == .protected
+                                          ? "这是基础 UTType，仅供查看，不能修改默认 App。"
+                                          : "这是较宽泛的 UTType，修改可能影响其他扩展名。"))
+                }
             }
+            .frame(width: 16, height: 16)
+            .accessibilityHidden(risk == .normal)
             Button(L10n.string("更改…")) {
                 typeBeingChanged = entry.type
             }

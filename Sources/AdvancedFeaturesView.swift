@@ -95,6 +95,9 @@ struct AdvancedFeaturesView: View {
                             Text(L10n.string("此页面仅用于诊断，不会修改系统设置。"))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        RegisteredUTTypeRelationshipsView(
+                            identifiers: analyses.map(\.identifier)
+                        )
                         ForEach(analyses) { analysis in
                             analysisCard(analysis)
                         }
@@ -223,17 +226,7 @@ struct AdvancedFeaturesView: View {
             Divider()
             Text(L10n.string("UTType 遵循关系（由具体到宽泛）"))
                 .font(.callout.weight(.semibold))
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(analysis.hierarchy) { node in
-                    HStack(spacing: 6) {
-                        Image(systemName: node.depth == 0 ? "circle.fill" : "arrow.turn.down.right")
-                            .font(.caption2)
-                            .foregroundStyle(node.depth == 0 ? Color.accentColor : Color.secondary)
-                        Text(node.identifier).font(.caption.monospaced()).textSelection(.enabled)
-                    }
-                    .padding(.leading, CGFloat(node.depth) * 18)
-                }
-            }
+            UTTypeHierarchyRelationshipsView(identifier: analysis.identifier)
         }
         .padding(16)
         .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
@@ -285,36 +278,8 @@ struct AdvancedFeaturesView: View {
             defaultApplicationName: store.defaultApplication(for: fileType)?.name ?? L10n.string("未设置"),
             defaultApplicationBundleID: store.defaultApplication(for: fileType)?.bundleIdentifier,
             capableAppCount: store.capableApplications(for: fileType).count,
-            risk: store.modificationRisk(for: fileType),
-            hierarchy: hierarchy(for: type)
+            risk: store.modificationRisk(for: fileType)
         )
-    }
-
-    private func hierarchy(for type: UTType) -> [UTTypeHierarchyNode] {
-        var result = [UTTypeHierarchyNode(identifier: type.identifier, depth: 0)]
-        var visited = Set([type.identifier])
-        var frontier = directParents(of: type)
-        var depth = 1
-        while !frontier.isEmpty {
-            let unique = Dictionary(grouping: frontier, by: \.identifier).compactMap(\.value.first)
-                .sorted { $0.identifier.localizedStandardCompare($1.identifier) == .orderedAscending }
-            for parent in unique where visited.insert(parent.identifier).inserted {
-                result.append(UTTypeHierarchyNode(identifier: parent.identifier, depth: depth))
-            }
-            frontier = unique.flatMap(directParents)
-                .filter { !visited.contains($0.identifier) }
-            depth += 1
-        }
-        return result
-    }
-
-    private func directParents(of type: UTType) -> [UTType] {
-        let all = Array(type.supertypes)
-        return all.filter { candidate in
-            !all.contains { other in
-                other != candidate && other.conforms(to: candidate)
-            }
-        }
     }
 
     private func chooseFile() {
@@ -382,13 +347,6 @@ private struct UTTypeAnalysis: Identifiable {
     let defaultApplicationBundleID: String?
     let capableAppCount: Int
     let risk: FileTypeModificationRisk
-    let hierarchy: [UTTypeHierarchyNode]
-    var id: String { identifier }
-}
-
-private struct UTTypeHierarchyNode: Identifiable {
-    let identifier: String
-    let depth: Int
     var id: String { identifier }
 }
 
