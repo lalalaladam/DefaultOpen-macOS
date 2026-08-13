@@ -166,6 +166,16 @@ struct DefaultAppCandidateTypeDetail: Identifiable {
     let isIgnored: Bool
 }
 
+struct DefaultAppCategoryTypeDetail: Identifiable {
+    let id: String
+    let label: String
+    let typeName: String
+    let technicalIdentifier: String
+    let modificationRisk: FileTypeModificationRisk
+    let canBeIgnored: Bool
+    let isIgnored: Bool
+}
+
 struct DefaultAppChangeResult {
     let changedTargets: [String]
     let skippedTargets: [String]

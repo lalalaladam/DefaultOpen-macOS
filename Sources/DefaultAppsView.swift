@@ -674,6 +674,7 @@ private struct DefaultAppPickerSheet: View {
     @State private var progressText: String?
     @State private var validationMessage: String?
     @State private var showsTypeDetails = false
+    @State private var showsCategoryTypeDetails = false
     @State private var confirmsBroadTypeChange = false
 
     private var selectedCandidate: DefaultAppCandidate? {
@@ -686,6 +687,16 @@ private struct DefaultAppPickerSheet: View {
 
     private var optionalStatus: DefaultAppCategoryStatus {
         store.optionalDefaultAppStatus(for: category)
+    }
+
+    private var categoryTypeDetails: [DefaultAppCategoryTypeDetail] {
+        store.defaultAppTypeDetails(for: category, includingOptional: includesOptional)
+    }
+
+    private var hasSettableTargets: Bool {
+        categoryTypeDetails.contains {
+            !$0.isIgnored && $0.modificationRisk != .protected
+        }
     }
 
     var body: some View {
@@ -712,6 +723,13 @@ private struct DefaultAppPickerSheet: View {
                         Text(L10n.string("尚未统一")).fontWeight(.medium).foregroundStyle(.orange)
                     }
                     Spacer()
+                    Button {
+                        showsCategoryTypeDetails = true
+                    } label: {
+                        Label(L10n.string("组合类型详情…"), systemImage: "list.bullet.rectangle")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
                 if !currentStatus.isUnified {
                     ForEach(currentStatus.assignments) { assignment in
@@ -891,6 +909,11 @@ private struct DefaultAppPickerSheet: View {
             reloadCandidates()
             didChange()
         }
+        .sheet(isPresented: $showsCategoryTypeDetails) {
+            DefaultAppCategoryTypeDetailsSheet(category: category,
+                                               includingOptional: includesOptional)
+                .environmentObject(store)
+        }
         .alert(L10n.string("无法使用所选 App"), isPresented: Binding(
             get: { validationMessage != nil },
             set: { if !$0 { validationMessage = nil } }
@@ -996,19 +1019,10 @@ private struct DefaultAppPickerSheet: View {
                     Text(L10n.string("当前默认")).font(.caption).foregroundStyle(.green)
                 }
                 if detail.isIgnored {
-                    Text(L10n.string("已忽略")).font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.string("此组合已忽略")).font(.caption).foregroundStyle(.secondary)
                 } else if !detail.isSupported {
                     Text(L10n.string("不会修改")).font(.caption).foregroundStyle(.orange)
                 }
-            }
-            if detail.canBeIgnored {
-                Button(L10n.string(detail.isIgnored ? "重新纳入" : "忽略此类型")) {
-                    store.setDefaultAppType(detail.technicalIdentifier,
-                                            ignored: !detail.isIgnored,
-                                            for: category)
-                }
-                .buttonStyle(.borderless)
-                .disabled(isApplying)
             }
         }
         .padding(.vertical, 5)
@@ -1043,7 +1057,7 @@ private struct DefaultAppPickerSheet: View {
             .buttonStyle(.borderedProminent)
             .disabled(selectedCandidate?.typeDetails.contains(where: {
                 $0.isSupported && !$0.isIgnored
-            }) != true || isApplying)
+            }) != true || !hasSettableTargets || isApplying)
         }
         .padding(16)
     }
@@ -1131,6 +1145,118 @@ private struct DefaultAppPickerSheet: View {
             } else {
                 isApplying = false
             }
+        }
+    }
+}
+
+private struct DefaultAppCategoryTypeDetailsSheet: View {
+    @EnvironmentObject private var store: AssociationStore
+    @Environment(\.dismiss) private var dismiss
+    let category: DefaultAppCategory
+    let includingOptional: Bool
+
+    private var details: [DefaultAppCategoryTypeDetail] {
+        store.defaultAppTypeDetails(for: category, includingOptional: includingOptional)
+    }
+
+    private var managedCount: Int {
+        details.filter { !$0.isIgnored && $0.modificationRisk != .protected }.count
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: category.symbol)
+                    .font(.system(size: 24)).foregroundStyle(.tint).frame(width: 36)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.string("组合类型详情")).font(.title2.weight(.semibold))
+                    Text(category.title).font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(20)
+
+            Divider()
+            VStack(alignment: .leading, spacing: 5) {
+                Text(L10n.string("这里的忽略设置属于整个组合，与选择哪个 App 无关。"))
+                Text(L10n.string("忽略后，此组合不会修改或检查该文件类型的默认 App。"))
+                    .foregroundStyle(.secondary)
+                if managedCount == 0 {
+                    Label(L10n.string("当前没有可设置的文件类型。"),
+                          systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange).fontWeight(.medium)
+                }
+            }
+            .font(.callout)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20).padding(.vertical, 12)
+
+            Divider()
+            List(details) { detail in
+                HStack(spacing: 10) {
+                    Image(systemName: iconName(for: detail))
+                        .foregroundStyle(iconColor(for: detail))
+                        .frame(width: 18)
+                    Text(detail.label)
+                        .font(.callout.monospaced())
+                        .frame(width: 100, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(detail.typeName).lineLimit(1)
+                        Text(detail.technicalIdentifier)
+                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                    Spacer()
+                    riskLabel(for: detail)
+                    if detail.canBeIgnored {
+                        Button(L10n.string(detail.isIgnored
+                                         ? "重新纳入此组合" : "从此组合中忽略")) {
+                            store.setDefaultAppType(detail.technicalIdentifier,
+                                                    ignored: !detail.isIgnored,
+                                                    for: category)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .scrollContentBackground(.hidden)
+
+            Divider()
+            HStack {
+                Text(L10n.format("status.managedTypeCount", managedCount, details.count))
+                    .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                Spacer()
+                Button(L10n.string("关闭")) { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 720, height: 520)
+        .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
+    }
+
+    private func iconName(for detail: DefaultAppCategoryTypeDetail) -> String {
+        if detail.isIgnored { return "eye.slash.fill" }
+        if detail.modificationRisk == .protected { return "lock.fill" }
+        if detail.modificationRisk == .broad { return "exclamationmark.triangle.fill" }
+        return "checkmark.circle.fill"
+    }
+
+    private func iconColor(for detail: DefaultAppCategoryTypeDetail) -> Color {
+        if detail.isIgnored { return .secondary }
+        if detail.modificationRisk != .normal { return .orange }
+        return .green
+    }
+
+    @ViewBuilder private func riskLabel(for detail: DefaultAppCategoryTypeDetail) -> some View {
+        if detail.isIgnored {
+            Text(L10n.string("已忽略")).font(.caption).foregroundStyle(.secondary)
+        } else if detail.modificationRisk == .protected {
+            Text(L10n.string("只读基础类型")).font(.caption).foregroundStyle(.orange)
+        } else if detail.modificationRisk == .broad {
+            Text(L10n.string("宽泛类型")).font(.caption).foregroundStyle(.orange)
         }
     }
 }

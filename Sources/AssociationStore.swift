@@ -349,6 +349,38 @@ final class AssociationStore: ObservableObject {
                                 ignoredTypeCount: ignoredTypeCount(in: targets, for: category))
     }
 
+    func defaultAppTypeDetails(for category: DefaultAppCategory,
+                               includingOptional: Bool) -> [DefaultAppCategoryTypeDetail] {
+        _ = defaultAppRevision
+        return defaultAppDisplayTargets(for: category, includingOptional: includingOptional).map { target in
+            let typeName: String
+            let identifier: String
+            let risk: FileTypeModificationRisk
+            let canBeIgnored: Bool
+            switch target.kind {
+            case .urlScheme(let scheme):
+                typeName = L10n.string("网页链接")
+                identifier = scheme.lowercased()
+                risk = .normal
+                canBeIgnored = false
+            case .fileType(let type):
+                typeName = type.specificDisplayName
+                identifier = type.contentTypeIdentifier
+                risk = modificationRisk(for: type)
+                canBeIgnored = true
+            }
+            return DefaultAppCategoryTypeDetail(
+                id: target.key,
+                label: target.label,
+                typeName: typeName,
+                technicalIdentifier: identifier,
+                modificationRisk: risk,
+                canBeIgnored: canBeIgnored,
+                isIgnored: canBeIgnored && isDefaultAppTypeIgnored(identifier, for: category)
+            )
+        }
+    }
+
     private func systemDefaultAppStatus(for category: DefaultAppCategory,
                                         includingOptional: Bool) -> DefaultAppCategoryStatus {
         let targets = defaultAppTargets(for: category, includingOptional: includingOptional,
