@@ -98,6 +98,15 @@ struct AdvancedFeaturesView: View {
                         RegisteredUTTypeRelationshipsView(
                             identifiers: analyses.map(\.identifier)
                         )
+                        Divider()
+                            .padding(.vertical, 4)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L10n.string("注册 UTType 详情"))
+                                .font(.headline)
+                            Text(L10n.string("以下分别显示每个注册类型的元数据、默认 App 和完整上级关系。"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         ForEach(analyses) { analysis in
                             analysisCard(analysis)
                         }
