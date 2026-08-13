@@ -267,6 +267,22 @@ final class AssociationStore: ObservableObject {
         launchServices.capableApplications(for: type)
     }
 
+    func modificationRisk(for type: FileTypeInfo) -> FileTypeModificationRisk {
+        let identifier = type.contentTypeIdentifier
+        if Self.protectedContentTypeIdentifiers.contains(identifier) { return .protected }
+        if Self.broadContentTypeIdentifiers.contains(identifier) { return .broad }
+        return .normal
+    }
+
+    func broadTypeIdentifiers(for category: DefaultAppCategory,
+                              includingOptional: Bool) -> [String] {
+        resolvedFileTypes(for: category, includingOptional: includingOptional)
+            .filter { !isDefaultAppTypeIgnored($0.contentTypeIdentifier, for: category) }
+            .filter { modificationRisk(for: $0) == .broad }
+            .map(\.contentTypeIdentifier)
+            .uniqued().sorted()
+    }
+
     func validatedApplication(at url: URL, for type: FileTypeInfo) throws -> ApplicationInfo {
         let application = try scanner.applicationInfo(at: url)
         guard applicationSupports(application, fileType: type) else {
@@ -436,6 +452,10 @@ final class AssociationStore: ObservableObject {
 
             for type in resolvedFileTypes(for: category, includingOptional: includingOptional)
                 where !isDefaultAppTypeIgnored(type.contentTypeIdentifier, for: category) {
+                if modificationRisk(for: type) == .protected {
+                    skippedTargets.append(type.dottedExtension)
+                    continue
+                }
                 if launchServices.defaultApplication(for: type)?.bundleIdentifier == application.bundleIdentifier {
                     unchangedTargets.append(type.dottedExtension)
                     continue
@@ -506,6 +526,10 @@ final class AssociationStore: ObservableObject {
         do {
             let uniqueTypes = Dictionary(grouping: types, by: \FileTypeInfo.contentTypeIdentifier)
                 .compactMap(\.value.first)
+            guard !uniqueTypes.contains(where: { modificationRisk(for: $0) == .protected }) else {
+                errorMessage = L10n.string("基础 UTType 仅供查看，不能修改默认 App。")
+                return false
+            }
             let unsupportedTypes = uniqueTypes.filter {
                 !applicationSupports(application, fileType: $0)
             }
@@ -588,7 +612,9 @@ final class AssociationStore: ObservableObject {
         return supportedType.fileTypes
     }
 
-    func matchingFileTypes(for searchText: String, includeAll: Bool) -> [FileTypeSearchResult] {
+    func matchingFileTypes(for searchText: String, includeAll: Bool,
+                           includesDisplayName: Bool,
+                           includesContentTypeIdentifier: Bool) -> [FileTypeSearchResult] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             let source = includeAll ? allFileTypes : fileTypes.filter { !isCustomFileType($0) }
@@ -597,9 +623,14 @@ final class AssociationStore: ObservableObject {
 
         let source = allFileTypes
         let extensionQuery = query.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        let requiresExactExtension = query.hasPrefix(".")
         var matches = source.compactMap { type -> FileTypeSearchResult? in
             guard let rank = FileTypeSearchRank.match(type: type, query: query,
-                                                      extensionQuery: extensionQuery) else { return nil }
+                                                      extensionQuery: extensionQuery,
+                                                      requiresExactExtension: requiresExactExtension,
+                                                      includesDisplayName: includesDisplayName,
+                                                      includesContentTypeIdentifier:
+                                                        includesContentTypeIdentifier) else { return nil }
             return FileTypeSearchResult(type: type, rank: rank)
         }
         if hasLoadedAllFileTypes,
@@ -619,7 +650,10 @@ final class AssociationStore: ObservableObject {
         let extensionQuery = query.trimmingCharacters(in: CharacterSet(charactersIn: "."))
         return source.filter {
             FileTypeSearchRank.match(type: $0, query: query,
-                                     extensionQuery: extensionQuery) != nil
+                                     extensionQuery: extensionQuery,
+                                     requiresExactExtension: query.hasPrefix("."),
+                                     includesDisplayName: true,
+                                     includesContentTypeIdentifier: true) != nil
         }
     }
 
@@ -892,6 +926,15 @@ final class AssociationStore: ObservableObject {
             }
         }
     }
+
+    private static let protectedContentTypeIdentifiers: Set<String> = [
+        "public.item", "public.content", "public.data", "public.composite-content"
+    ]
+
+    private static let broadContentTypeIdentifiers: Set<String> = [
+        "public.text", "public.image", "public.audio", "public.movie",
+        "public.audiovisual-content", "public.archive"
+    ]
 }
 
 struct FileTypeSearchResult {
@@ -909,24 +952,31 @@ enum FileTypeSearchRank: Int, Comparable {
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 
     static func match(type: FileTypeInfo, query: String,
-                      extensionQuery: String) -> FileTypeSearchRank? {
+                      extensionQuery: String,
+                      requiresExactExtension: Bool,
+                      includesDisplayName: Bool,
+                      includesContentTypeIdentifier: Bool) -> FileTypeSearchRank? {
         let normalizedExtension = folded(type.extensionName)
         let normalizedExtensionQuery = folded(extensionQuery)
         if !normalizedExtensionQuery.isEmpty {
             if normalizedExtension == normalizedExtensionQuery { return .extensionExact }
-            if normalizedExtension.hasPrefix(normalizedExtensionQuery) { return .extensionPrefix }
+            if !requiresExactExtension,
+               normalizedExtension.hasPrefix(normalizedExtensionQuery) { return .extensionPrefix }
         }
 
         let normalizedQuery = folded(query)
-        if matchesWords(normalizedQuery, in: folded(type.displayName)) { return .displayName }
+        if includesDisplayName,
+           matchesWords(normalizedQuery, in: folded(type.displayName)) { return .displayName }
 
-        let identifier = folded(type.contentTypeIdentifier)
-        if normalizedQuery.contains(".") {
-            if identifier == normalizedQuery || identifier.hasPrefix(normalizedQuery) {
+        if includesContentTypeIdentifier {
+            let identifier = folded(type.contentTypeIdentifier)
+            if normalizedQuery.contains(".") {
+                if identifier == normalizedQuery || identifier.hasPrefix(normalizedQuery) {
+                    return .contentTypeIdentifier
+                }
+            } else if identifierComponents(identifier).contains(where: { $0.hasPrefix(normalizedQuery) }) {
                 return .contentTypeIdentifier
             }
-        } else if identifierComponents(identifier).contains(where: { $0.hasPrefix(normalizedQuery) }) {
-            return .contentTypeIdentifier
         }
         return nil
     }

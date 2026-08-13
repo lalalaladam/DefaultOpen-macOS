@@ -20,6 +20,7 @@ struct ContentView: View {
                     case .fileTypes: FileTypesView()
                     case .applications: ApplicationsView()
                     case .defaultApps: DefaultAppsView()
+                    case .advanced: AdvancedFeaturesView()
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

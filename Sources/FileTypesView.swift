@@ -14,9 +14,16 @@ struct FileTypesView: View {
     @State private var typePendingDeletion: FileTypeInfo?
     @State private var typePendingAddition: FileTypeInfo?
     @State private var presentedAssociationDetails: FileTypeAssociationDetails?
+    @AppStorage("fileTypeSearchIncludesDisplayName") private var searchIncludesDisplayName = false
+    @AppStorage("fileTypeSearchIncludesUTType") private var searchIncludesUTType = false
 
     private var rows: [FileTypeRow] {
-        let matches = store.matchingFileTypes(for: searchText, includeAll: showsAllTypes)
+        let matches = store.matchingFileTypes(
+            for: searchText,
+            includeAll: showsAllTypes,
+            includesDisplayName: searchIncludesDisplayName,
+            includesContentTypeIdentifier: searchIncludesUTType
+        )
         return matches.map { match in
             let app = store.defaultApplication(for: match.type)
             return (row: FileTypeRow(type: match.type,
@@ -145,6 +152,7 @@ struct FileTypesView: View {
                         LazyVStack(spacing: 0) {
                             ForEach(rows) { row in
                             let otherRegisteredTypeCount = otherRegisteredTypes(for: row.type).count
+                            let modificationRisk = store.modificationRisk(for: row.type)
                             HStack(spacing: 12) {
                                 Text(row.type.dottedExtension)
                                     .font(.system(.body, design: .monospaced).weight(.semibold))
@@ -167,6 +175,14 @@ struct FileTypesView: View {
                                                 .foregroundStyle(.secondary)
                                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                                 .background(.secondary.opacity(0.12), in: Capsule())
+                                        }
+                                        if modificationRisk != .normal {
+                                            Image(systemName: modificationRisk == .protected
+                                                  ? "lock.fill" : "exclamationmark.triangle.fill")
+                                                .font(.caption).foregroundStyle(.orange)
+                                                .help(L10n.string(modificationRisk == .protected
+                                                    ? "这是基础 UTType，仅供查看，不能修改默认 App。"
+                                                    : "这是较宽泛的 UTType，修改可能影响其他扩展名。"))
                                         }
                                         if otherRegisteredTypeCount > 0 {
                                             Button {
@@ -208,6 +224,7 @@ struct FileTypesView: View {
                                     Button(L10n.string("更改…")) { presentedType = row.type }
                                         .buttonStyle(.bordered)
                                         .controlSize(.regular)
+                                        .disabled(modificationRisk == .protected)
                                 }
                                 .frame(width: actionWidth, alignment: .trailing)
                             }
@@ -264,7 +281,18 @@ struct FileTypesView: View {
                 .accessibilityHidden(!store.isLoadingFileTypes)
                 .help(L10n.string("正在载入全部类型…"))
             .frame(width: 16, height: 16)
-            SearchBox(prompt: "搜索扩展名或文件类型", text: $searchText)
+            SearchBox(prompt: searchPrompt, text: $searchText)
+                .help(L10n.string(searchScopeDescription))
+            Menu {
+                Toggle(L10n.string("文件类型名称"), isOn: $searchIncludesDisplayName)
+                Toggle(L10n.string("UTType 标识符"), isOn: $searchIncludesUTType)
+            } label: {
+                Image(systemName: searchIncludesDisplayName || searchIncludesUTType
+                      ? "line.3.horizontal.decrease.circle.fill"
+                      : "line.3.horizontal.decrease.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .help(L10n.string(searchScopeDescription))
             Button { addingExtension = true } label: { Label(L10n.string("添加扩展名"), systemImage: "plus") }
                 .buttonStyle(.bordered)
             Menu {
@@ -276,6 +304,24 @@ struct FileTypesView: View {
             .help(L10n.string("管理自定义扩展名"))
         }
         .padding(.horizontal, 22).padding(.vertical, 16)
+    }
+
+    private var searchPrompt: String {
+        if searchIncludesDisplayName && searchIncludesUTType {
+            return "搜索全部字段"
+        }
+        if searchIncludesDisplayName { return "搜索扩展名和名称" }
+        if searchIncludesUTType { return "搜索扩展名和 UTType" }
+        return "搜索扩展名"
+    }
+
+    private var searchScopeDescription: String {
+        if searchIncludesDisplayName && searchIncludesUTType {
+            return "当前搜索：扩展名、文件类型名称和 UTType 标识符"
+        }
+        if searchIncludesDisplayName { return "当前搜索：扩展名和文件类型名称" }
+        if searchIncludesUTType { return "当前搜索：扩展名和 UTType 标识符" }
+        return "当前搜索：扩展名"
     }
 
     private func sortableHeader(_ title: String, column: FileTypeSortColumn,
@@ -597,11 +643,20 @@ private struct FileTypeAssociationDetailsSheet: View {
             Text(application?.name ?? L10n.string("未设置"))
                 .frame(width: 125, alignment: .leading)
                 .foregroundStyle(application == nil ? .secondary : .primary)
+            let risk = store.modificationRisk(for: entry.type)
+            if risk != .normal {
+                Image(systemName: risk == .protected ? "lock.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .help(L10n.string(risk == .protected
+                                      ? "这是基础 UTType，仅供查看，不能修改默认 App。"
+                                      : "这是较宽泛的 UTType，修改可能影响其他扩展名。"))
+            }
             Button(L10n.string("更改…")) {
                 typeBeingChanged = entry.type
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .disabled(risk == .protected)
         }
     }
 
@@ -629,6 +684,7 @@ private struct ApplicationPickerSheet: View {
     @State private var selectedApplicationID: ApplicationInfo.ID?
     @State private var isApplying = false
     @State private var validationMessage: String?
+    @State private var confirmsBroadTypeChange = false
 
     private var selectedApplication: ApplicationInfo? {
         applications.first { $0.id == selectedApplicationID }
@@ -638,6 +694,10 @@ private struct ApplicationPickerSheet: View {
         store.registeredFileTypes(forExtension: type.extensionName).filter {
             $0.contentTypeIdentifier != type.contentTypeIdentifier
         }.count
+    }
+
+    private var modificationRisk: FileTypeModificationRisk {
+        store.modificationRisk(for: type)
     }
 
     var body: some View {
@@ -653,6 +713,15 @@ private struct ApplicationPickerSheet: View {
                         Text(type.contentTypeIdentifier)
                             .font(.caption.monospaced()).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)
+                    }
+                    if modificationRisk == .protected {
+                        Label(L10n.string("这是基础 UTType，仅供查看，不能修改默认 App。"),
+                              systemImage: "lock.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                    } else if modificationRisk == .broad {
+                        Label(L10n.string("这是较宽泛的 UTType，修改可能影响其他扩展名。"),
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
                     }
                     if otherRegisteredTypeCount > 0 {
                         Text(L10n.string("此扩展名的其他注册类型不会被修改。"))
@@ -736,7 +805,11 @@ private struct ApplicationPickerSheet: View {
                         .keyboardShortcut(.cancelAction)
                         .disabled(isApplying)
                     Button {
-                        applySelection()
+                        if modificationRisk == .broad {
+                            confirmsBroadTypeChange = true
+                        } else {
+                            applySelection()
+                        }
                     } label: {
                         if isApplying {
                             ProgressView().controlSize(.small)
@@ -746,7 +819,7 @@ private struct ApplicationPickerSheet: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(selectedApplication == nil || isApplying)
+                    .disabled(selectedApplication == nil || isApplying || modificationRisk == .protected)
                 }
             }
             .padding(16)
@@ -768,6 +841,15 @@ private struct ApplicationPickerSheet: View {
             Button(L10n.string("好"), role: .cancel) {}
         } message: {
             Text(validationMessage ?? "")
+        }
+        .confirmationDialog(L10n.string("修改较宽泛的 UTType？"),
+                            isPresented: $confirmsBroadTypeChange,
+                            titleVisibility: .visible) {
+            Button(L10n.string("继续设置")) { applySelection() }
+            Button(L10n.string("取消"), role: .cancel) {}
+        } message: {
+            Text(L10n.format("typeRisk.confirmation", type.contentTypeIdentifier,
+                             type.dottedExtension))
         }
     }
 

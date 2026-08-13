@@ -356,6 +356,10 @@ private struct ApplicationDetailView: View {
             store.errorMessage = L10n.string("此 UTType 没有声明可用于设置关联的文件扩展名。")
             return
         }
+        guard !types.contains(where: { store.modificationRisk(for: $0) == .protected }) else {
+            store.errorMessage = L10n.string("基础 UTType 仅供查看，不能修改默认 App。")
+            return
+        }
         pendingDefaultChange = PendingDefaultChange(types: types, supportedTypeCount: 1)
     }
 
@@ -368,6 +372,10 @@ private struct ApplicationDetailView: View {
             store.errorMessage = L10n.string("所选类型没有可用于设置关联的文件扩展名。")
             return
         }
+        guard !unique.contains(where: { store.modificationRisk(for: $0) == .protected }) else {
+            store.errorMessage = L10n.string("所选项目包含只读基础 UTType，请取消选择后重试。")
+            return
+        }
         pendingDefaultChange = PendingDefaultChange(types: unique, supportedTypeCount: unique.count)
     }
 
@@ -378,11 +386,17 @@ private struct ApplicationDetailView: View {
 
     private var confirmationMessage: String {
         guard let change = pendingDefaultChange else { return "" }
+        let broad = change.types.filter { store.modificationRisk(for: $0) == .broad }
+        let warning = broad.isEmpty ? "" : "\n\n" + L10n.format(
+            "typeRisk.batchConfirmation",
+            Array(Set(broad.map(\.contentTypeIdentifier))).sorted()
+                .joined(separator: L10n.string("list.separator"))
+        )
         if change.supportedTypeCount == 1 {
-            return L10n.format("application.confirmSingleType", application.name)
+            return L10n.format("application.confirmSingleType", application.name) + warning
         }
         return L10n.format("application.confirmMultipleTypes",
-                           application.name, change.supportedTypeCount)
+                           application.name, change.supportedTypeCount) + warning
     }
 
     private func applyPendingDefaultChange() {

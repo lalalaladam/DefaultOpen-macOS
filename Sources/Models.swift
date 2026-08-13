@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ApplicationInfo: Identifiable, Hashable, Sendable {
     let bundleIdentifier: String
@@ -73,14 +74,22 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     case fileTypes = "文件类型"
     case applications = "应用程序"
     case defaultApps = "默认 App"
+    case advanced = "高级功能"
     var id: Self { self }
     var symbol: String {
         switch self {
         case .fileTypes: "doc.badge.gearshape"
         case .applications: "square.grid.2x2"
         case .defaultApps: "checkmark.circle.fill"
+        case .advanced: "wrench.and.screwdriver"
         }
     }
+}
+
+enum FileTypeModificationRisk: Equatable {
+    case normal
+    case broad
+    case protected
 }
 
 struct DefaultAppCategory: Identifiable, Hashable, Codable {

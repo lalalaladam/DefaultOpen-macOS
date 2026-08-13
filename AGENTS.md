@@ -9,6 +9,11 @@
 - Maintain compatibility with the project's supported macOS version.
 - After meaningful changes, ensure the project builds successfully.
 
+## Xcode
+
+- Use `DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer"` for all `xcodebuild` commands.
+- Do not rely on or change the system-wide `xcode-select` setting.
+
 ## Git
 
 - Do not commit, push, tag, publish, or create releases without explicit user authorization.

@@ -674,6 +674,7 @@ private struct DefaultAppPickerSheet: View {
     @State private var progressText: String?
     @State private var validationMessage: String?
     @State private var showsTypeDetails = false
+    @State private var confirmsBroadTypeChange = false
 
     private var selectedCandidate: DefaultAppCandidate? {
         candidates.first { $0.id == selectedCandidateID }
@@ -864,10 +865,21 @@ private struct DefaultAppPickerSheet: View {
             }
 
             Divider()
-            ScrollView {
-                selectionSummary
+            ScrollViewReader { proxy in
+                ScrollView {
+                    selectionSummary
+                }
+                .onChange(of: showsTypeDetails) { _, showsDetails in
+                    guard showsDetails else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            proxy.scrollTo("type-details", anchor: .top)
+                        }
+                    }
+                }
             }
-            .frame(height: 184)
+            .frame(height: selectionSummaryHeight)
 
             Divider()
             actionBar
@@ -887,11 +899,28 @@ private struct DefaultAppPickerSheet: View {
         } message: {
             Text(validationMessage ?? "")
         }
+        .confirmationDialog(L10n.string("修改较宽泛的 UTType？"),
+                            isPresented: $confirmsBroadTypeChange,
+                            titleVisibility: .visible) {
+            Button(L10n.string("继续设置")) { applySelection() }
+            Button(L10n.string("取消"), role: .cancel) {}
+        } message: {
+            Text(L10n.format(
+                "typeRisk.batchConfirmation",
+                store.broadTypeIdentifiers(for: category, includingOptional: includesOptional)
+                    .joined(separator: L10n.string("list.separator"))
+            ))
+        }
     }
 
     private var targetDescription: String {
         if !category.urlSchemes.isEmpty { return L10n.string("处理 HTTP 和 HTTPS 网页链接") }
         return category.coreExtensions.map { "." + $0 }.joined(separator: L10n.string("list.separator"))
+    }
+
+    private var selectionSummaryHeight: CGFloat {
+        guard selectedCandidate != nil else { return 56 }
+        return 138
     }
 
     @ViewBuilder private var selectionSummary: some View {
@@ -930,6 +959,7 @@ private struct DefaultAppPickerSheet: View {
                             if detail.id != candidate.typeDetails.last?.id { Divider() }
                         }
                     }
+                    .id("type-details")
                 }
             } else {
                 Text(L10n.string("请先选择一个应用。点击应用不会立即修改系统设置。"))
@@ -996,7 +1026,12 @@ private struct DefaultAppPickerSheet: View {
             Button(L10n.string("取消")) { dismiss() }
                 .keyboardShortcut(.cancelAction).disabled(isApplying)
             Button {
-                applySelection()
+                if store.broadTypeIdentifiers(for: category,
+                                              includingOptional: includesOptional).isEmpty {
+                    applySelection()
+                } else {
+                    confirmsBroadTypeChange = true
+                }
             } label: {
                 if isApplying {
                     ProgressView().controlSize(.small)
