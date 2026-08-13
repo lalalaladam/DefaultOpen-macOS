@@ -456,6 +456,12 @@ struct ApplicationPickerSheet: View {
         applications.first { $0.id == selectedApplicationID }
     }
 
+    private var selectedApplicationIsCurrentDefault: Bool {
+        guard let selectedApplication else { return false }
+        return store.defaultApplication(for: type)?.bundleIdentifier
+            == selectedApplication.bundleIdentifier
+    }
+
     private var modificationRisk: FileTypeModificationRisk {
         store.modificationRisk(for: type)
     }
@@ -464,22 +470,14 @@ struct ApplicationPickerSheet: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.format("picker.changeTypeDefaultTitle", type.dottedExtension))
+                    Text(L10n.format("picker.openWithTitle", type.dottedExtension))
                         .font(.title2.weight(.semibold))
-                    Text(L10n.string("本次仅修改以下文件类型"))
-                        .font(.callout).foregroundStyle(.secondary)
-                    HStack(spacing: 6) {
-                        Text(type.specificDisplayName).fontWeight(.medium)
-                        Text(type.contentTypeIdentifier)
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.middle)
-                    }
                     if modificationRisk == .protected {
-                        Label(L10n.string("这是基础 UTType，仅供查看，不能修改默认 App。"),
+                        Label(L10n.string("这个文件类型只能查看，不能修改默认 App。"),
                               systemImage: "lock.fill")
                             .font(.caption).foregroundStyle(.orange)
                     } else if modificationRisk == .broad {
-                        Label(L10n.string("这是较宽泛的 UTType，修改可能影响其他扩展名。"),
+                        Label(L10n.string("这项修改可能同时影响其他扩展名。"),
                               systemImage: "exclamationmark.triangle.fill")
                             .font(.caption).foregroundStyle(.orange)
                     }
@@ -538,9 +536,9 @@ struct ApplicationPickerSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 5) {
                     if let app = selectedApplication {
-                        Text(L10n.format("picker.setAppForType", app.name, type.specificDisplayName))
+                        Text(L10n.format("picker.setAppForExtension", app.name, type.dottedExtension))
                             .font(.headline)
-                        Text(L10n.string("只会修改上方标明的文件类型。"))
+                        Text(L10n.format("picker.extensionExplanation", type.dottedExtension))
                             .font(.callout).foregroundStyle(.secondary)
                     } else {
                         Text(L10n.string("请先选择一个 App。点击应用不会立即修改系统设置。"))
@@ -570,12 +568,15 @@ struct ApplicationPickerSheet: View {
                         if isApplying {
                             ProgressView().controlSize(.small)
                             Text(L10n.string("正在设置…"))
+                        } else if selectedApplicationIsCurrentDefault {
+                            Text(L10n.string("已是默认"))
                         } else {
-                            Text(L10n.string("设为此类型默认"))
+                            Text(L10n.string("设为默认"))
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(selectedApplication == nil || isApplying || modificationRisk == .protected)
+                    .disabled(selectedApplication == nil || selectedApplicationIsCurrentDefault
+                              || isApplying || modificationRisk == .protected)
                 }
             }
             .padding(16)
@@ -598,14 +599,13 @@ struct ApplicationPickerSheet: View {
         } message: {
             Text(validationMessage ?? "")
         }
-        .confirmationDialog(L10n.string("修改较宽泛的 UTType？"),
+        .confirmationDialog(L10n.string("这项修改可能影响其他扩展名"),
                             isPresented: $confirmsBroadTypeChange,
                             titleVisibility: .visible) {
             Button(L10n.string("继续设置")) { applySelection() }
             Button(L10n.string("取消"), role: .cancel) {}
         } message: {
-            Text(L10n.format("typeRisk.confirmation", type.contentTypeIdentifier,
-                             type.dottedExtension))
+            Text(L10n.string("macOS 会把一些扩展名作为同一种文件类型处理。继续后，它们的默认 App 也可能一起改变。"))
         }
     }
 

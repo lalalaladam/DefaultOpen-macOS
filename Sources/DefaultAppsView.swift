@@ -59,8 +59,8 @@ struct DefaultAppsView: View {
         }
         .sheet(item: $editorRequest) { request in
             DefaultAppCategoryEditorSheet(request: request) { id, title, subtitle, symbol, extensions in
-                if store.saveCustomDefaultAppCategory(id: id, title: title, subtitle: subtitle,
-                                                      symbol: symbol, extensions: extensions) {
+                if await store.saveCustomDefaultAppCategory(id: id, title: title, subtitle: subtitle,
+                                                            symbol: symbol, extensions: extensions) {
                     editorRequest = nil
                     refreshID = UUID()
                     return true
@@ -93,10 +93,7 @@ private struct DefaultAppCategoryCard: View {
     let editAction: () -> Void
     let duplicateAction: () -> Void
     let deleteAction: () -> Void
-
-    private var status: DefaultAppCategoryStatus {
-        store.defaultAppStatus(for: category)
-    }
+    @State private var status: DefaultAppCategoryStatus?
 
     private var displayedSubtitle: String {
         if !category.subtitle.isEmpty { return category.subtitle }
@@ -162,12 +159,15 @@ private struct DefaultAppCategoryCard: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.primary.opacity(0.08))
         }
+        .task(id: "\(category.id)|\(store.defaultAppRevision)") {
+            status = await store.loadDefaultAppStatus(for: category)
+        }
     }
 
     @ViewBuilder private var currentLabel: some View {
         if !hasTargets {
             EmptyView()
-        } else if status.isUnified, let app = status.unifiedApplication {
+        } else if let status, status.isUnified, let app = status.unifiedApplication {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     AppIcon(url: app.url, size: 20)
@@ -180,13 +180,9 @@ private struct DefaultAppCategoryCard: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .layoutPriority(1)
                 }
-                if status.ignoredTypeCount > 0 {
-                    Text(L10n.format("status.ignoredTypeCount", status.ignoredTypeCount))
-                        .font(.callout).foregroundStyle(.secondary)
-                }
             }
             .font(.body.weight(.medium))
-        } else {
+        } else if let status {
             VStack(alignment: .leading, spacing: 2) {
                 Label(L10n.string("尚未统一"), systemImage: "exclamationmark.circle")
                     .font(.body.weight(.medium)).foregroundStyle(.orange)
@@ -213,10 +209,12 @@ private struct DefaultAppCategoryCard: View {
                         .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                         .help(missingText)
                 }
-                if status.ignoredTypeCount > 0 {
-                    Text(L10n.format("status.ignoredTypeCount", status.ignoredTypeCount))
-                        .font(.callout).foregroundStyle(.secondary)
-                }
+            }
+        } else {
+            HStack(spacing: 7) {
+                ProgressView().controlSize(.small)
+                Text(L10n.string("正在载入当前状态…"))
+                    .font(.callout).foregroundStyle(.secondary)
             }
         }
     }
@@ -258,7 +256,7 @@ private struct DefaultAppCategoryEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: AssociationStore
     let request: DefaultAppCategoryEditorRequest
-    let onSave: (String?, String, String, String, [String]) -> Bool
+    let onSave: (String?, String, String, String, [String]) async -> Bool
 
     @State private var title: String
     @State private var subtitle: String
@@ -270,10 +268,11 @@ private struct DefaultAppCategoryEditorSheet: View {
     @State private var scrollRequestID = UUID()
     @State private var confirmingSaveWithDraft = false
     @State private var extensionSearchText = ""
+    @State private var isSaving = false
     @FocusState private var focusedField: EditorField?
 
     private enum EditorField {
-        case initial, title, subtitle, extensions
+        case title, subtitle, extensions
     }
 
     private static let symbols = [
@@ -283,7 +282,7 @@ private struct DefaultAppCategoryEditorSheet: View {
     ]
 
     init(request: DefaultAppCategoryEditorRequest,
-         onSave: @escaping (String?, String, String, String, [String]) -> Bool) {
+         onSave: @escaping (String?, String, String, String, [String]) async -> Bool) {
         self.request = request
         self.onSave = onSave
         let category = request.category
@@ -440,24 +439,24 @@ private struct DefaultAppCategoryEditorSheet: View {
                 Button(L10n.string("取消")) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(L10n.string("保存")) {
                     if parsedExtensions(from: extensionDraft).isEmpty {
-                        save()
+                        Task { await save() }
                     } else {
                         confirmingSaveWithDraft = true
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                .overlay {
+                    if isSaving { ProgressView().controlSize(.small) }
+                }
             }
             .padding(16)
         }
         .frame(width: 600, height: 520)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
-        .focusable()
-        .focused($focusedField, equals: .initial)
-        .defaultFocus($focusedField, .initial)
         .alert(L10n.string("还有未添加的扩展名"), isPresented: $confirmingSaveWithDraft) {
             Button(L10n.string("返回添加"), role: .cancel) { focusedField = .extensions }
-            Button(L10n.string("忽略并保存")) { save() }
+            Button(L10n.string("忽略并保存")) { Task { await save() } }
         } message: {
             Text(L10n.string("输入框中的扩展名尚未添加，不会保存到组合中。"))
         }
@@ -512,9 +511,12 @@ private struct DefaultAppCategoryEditorSheet: View {
         focusedField = .extensions
     }
 
-    private func save() {
-        if onSave(editingID, title, subtitle, symbol, normalizedExtensions) {
+    private func save() async {
+        isSaving = true
+        if await onSave(editingID, title, subtitle, symbol, normalizedExtensions) {
             dismiss()
+        } else {
+            isSaving = false
         }
     }
 
@@ -673,30 +675,25 @@ private struct DefaultAppPickerSheet: View {
     @State private var resultMessage: String?
     @State private var progressText: String?
     @State private var validationMessage: String?
-    @State private var showsTypeDetails = false
-    @State private var showsCategoryTypeDetails = false
     @State private var confirmsBroadTypeChange = false
+    @State private var currentStatus: DefaultAppCategoryStatus?
+    @State private var optionalStatus: DefaultAppCategoryStatus?
+    @State private var isLoadingCandidates = true
 
     private var selectedCandidate: DefaultAppCandidate? {
         candidates.first { $0.id == selectedCandidateID }
     }
 
-    private var currentStatus: DefaultAppCategoryStatus {
-        store.defaultAppStatus(for: category)
-    }
-
-    private var optionalStatus: DefaultAppCategoryStatus {
-        store.optionalDefaultAppStatus(for: category)
-    }
-
-    private var categoryTypeDetails: [DefaultAppCategoryTypeDetail] {
-        store.defaultAppTypeDetails(for: category, includingOptional: includesOptional)
-    }
-
     private var hasSettableTargets: Bool {
-        categoryTypeDetails.contains {
-            $0.isManaged && $0.modificationRisk != .protected
+        candidates.contains { candidate in
+            candidate.typeDetails.contains { $0.canChangeDefault }
         }
+    }
+
+    private var selectedCandidateHasPendingChanges: Bool {
+        selectedCandidate?.typeDetails.contains {
+            $0.canChangeDefault && !$0.isCurrentDefault
+        } == true
     }
 
     var body: some View {
@@ -716,85 +713,72 @@ private struct DefaultAppPickerSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(L10n.string("当前状态：")).foregroundStyle(.secondary)
-                    if let app = currentStatus.unifiedApplication {
+                    if let app = currentStatus?.unifiedApplication {
                         AppIcon(url: app.url, size: 20)
                         Text(app.name).fontWeight(.medium)
-                    } else {
+                    } else if currentStatus != nil {
                         Text(L10n.string("尚未统一")).fontWeight(.medium).foregroundStyle(.orange)
+                    } else {
+                        ProgressView().controlSize(.small)
                     }
                     Spacer()
-                    Button {
-                        showsCategoryTypeDetails = true
-                    } label: {
-                        Label(L10n.string("组合类型详情…"), systemImage: "list.bullet.rectangle")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
-                if !currentStatus.isUnified {
+                if let currentStatus, !currentStatus.isUnified {
                     ForEach(currentStatus.assignments) { assignment in
-                        let assignmentText = L10n.format(
-                            "status.assignment",
-                            assignment.application.name,
-                            assignment.targets.joined(separator: L10n.string("list.separator"))
-                        )
-                        Text(assignmentText)
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .help(assignmentText)
+                        statusMappingRow(application: assignment.application,
+                                         targets: assignment.targets)
                     }
                     if !currentStatus.missingTargets.isEmpty {
-                        let missingText = L10n.format(
-                            "status.notSet",
-                            currentStatus.missingTargets.joined(separator: L10n.string("list.separator"))
-                        )
-                        Text(missingText)
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .help(missingText)
+                        HStack(spacing: 7) {
+                            Image(systemName: "questionmark.circle")
+                                .foregroundStyle(.secondary).frame(width: 18)
+                            Text(L10n.string("未设置"))
+                                .font(.caption)
+                            Image(systemName: "arrow.right")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                            Text(currentStatus.missingTargets.joined(
+                                separator: L10n.string("list.separator")))
+                                .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                            Spacer()
+                        }
                     }
-                }
-                if currentStatus.ignoredTypeCount > 0 {
-                    Text(L10n.format("status.ignoredTypeCount", currentStatus.ignoredTypeCount))
-                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if category.hasOptionalExtensions {
                     Divider().padding(.vertical, 3)
                     HStack(spacing: 8) {
                         Text(L10n.string("扩展格式状态：")).foregroundStyle(.secondary)
-                        if let app = optionalStatus.unifiedApplication {
+                        if let app = optionalStatus?.unifiedApplication {
                             AppIcon(url: app.url, size: 18)
                             Text(app.name).fontWeight(.medium)
                             Text(optionalDescription).foregroundStyle(.secondary)
                                 .lineLimit(1).help(optionalDescription)
-                        } else {
+                        } else if optionalStatus != nil {
                             Text(L10n.string("尚未统一"))
                                 .fontWeight(.medium).foregroundStyle(.orange)
+                        } else {
+                            ProgressView().controlSize(.small)
                         }
                         Spacer()
                     }
-                    if !optionalStatus.isUnified {
+                    if let optionalStatus, !optionalStatus.isUnified {
                         ForEach(optionalStatus.assignments) { assignment in
-                            let assignmentText = L10n.format(
-                                "status.assignment",
-                                assignment.application.name,
-                                assignment.targets.joined(separator: L10n.string("list.separator"))
-                            )
-                            Text(assignmentText)
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                .help(assignmentText)
+                            statusMappingRow(application: assignment.application,
+                                             targets: assignment.targets)
                         }
                         if !optionalStatus.missingTargets.isEmpty {
-                            let missingText = L10n.format(
-                                "status.notSet",
-                                optionalStatus.missingTargets.joined(separator: L10n.string("list.separator"))
-                            )
-                            Text(missingText)
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                .help(missingText)
+                            HStack(spacing: 7) {
+                                Image(systemName: "questionmark.circle")
+                                    .foregroundStyle(.secondary).frame(width: 18)
+                                Text(L10n.string("未设置"))
+                                    .font(.caption)
+                                Image(systemName: "arrow.right")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                                Text(optionalStatus.missingTargets.joined(
+                                    separator: L10n.string("list.separator")))
+                                    .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                                Spacer()
+                            }
                         }
-                    }
-                    if optionalStatus.ignoredTypeCount > 0 {
-                        Text(L10n.format("status.ignoredTypeCount", optionalStatus.ignoredTypeCount))
-                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -815,11 +799,16 @@ private struct DefaultAppPickerSheet: View {
                 }
                 .toggleStyle(.switch)
                 .padding(.horizontal, 20).padding(.vertical, 12)
-                .onChange(of: includesOptional) { _, _ in reloadCandidates() }
+                .onChange(of: includesOptional) { _, _ in
+                    Task { await reloadCandidates() }
+                }
             }
 
             Divider()
-            if candidates.isEmpty {
+            if isLoadingCandidates {
+                ProgressView(L10n.string("正在载入可用的应用…"))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if candidates.isEmpty {
                 ContentUnavailableView(L10n.string("没有找到可用的应用"), systemImage: "app.badge.checkmark",
                                        description: Text(L10n.string("系统没有注册能够处理这些类型的应用。")))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -840,27 +829,14 @@ private struct DefaultAppPickerSheet: View {
                                     Text(candidate.application.name).foregroundStyle(.primary)
                                     Text(candidate.application.bundleIdentifier)
                                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    if !candidate.currentTargets.isEmpty && !candidate.isCurrentDefault {
-                                        let targetsText = L10n.format(
-                                            "status.currentTargets",
-                                            candidate.currentTargets.joined(separator: L10n.string("list.separator"))
-                                        )
-                                        Text(targetsText)
-                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                            .help(targetsText)
-                                    }
                                 }
                                 .alignmentGuide(.listRowSeparatorLeading) { dimensions in
                                     dimensions[.leading]
                                 }
                                 Spacer()
-                                VStack(alignment: .trailing, spacing: 4) {
-                                    if candidate.isCurrentDefault {
-                                        Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
-                                            .font(.callout.weight(.medium)).foregroundStyle(.green)
-                                    }
-                                    Text(L10n.format("status.supportedFraction", candidate.supportedCount, candidate.totalCount))
-                                        .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                                if candidate.isCurrentDefault {
+                                    Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
+                                        .font(.callout.weight(.medium)).foregroundStyle(.green)
                                 }
                             }
                             .padding(.vertical, 4)
@@ -883,36 +859,20 @@ private struct DefaultAppPickerSheet: View {
             }
 
             Divider()
-            ScrollViewReader { proxy in
-                ScrollView {
-                    selectionSummary
-                }
-                .onChange(of: showsTypeDetails) { _, showsDetails in
-                    guard showsDetails else { return }
-                    Task { @MainActor in
-                        await Task.yield()
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            proxy.scrollTo("type-details", anchor: .top)
-                        }
-                    }
-                }
-            }
-            .frame(height: selectionSummaryHeight)
+            selectionSummary
+                .frame(height: selectionSummaryHeight)
 
             Divider()
             actionBar
         }
         .frame(width: 620, height: 680)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
-        .onAppear { reloadCandidates() }
+        .task(id: category.id) { await reloadCandidates() }
         .onChange(of: store.defaultAppRevision) { _, _ in
-            reloadCandidates()
-            didChange()
-        }
-        .sheet(isPresented: $showsCategoryTypeDetails) {
-            DefaultAppCategoryTypeDetailsSheet(category: category,
-                                               includingOptional: includesOptional)
-                .environmentObject(store)
+            Task {
+                await reloadCandidates()
+                didChange()
+            }
         }
         .alert(L10n.string("无法使用所选 App"), isPresented: Binding(
             get: { validationMessage != nil },
@@ -928,11 +888,25 @@ private struct DefaultAppPickerSheet: View {
             Button(L10n.string("继续设置")) { applySelection() }
             Button(L10n.string("取消"), role: .cancel) {}
         } message: {
-            Text(L10n.format(
-                "typeRisk.batchConfirmation",
-                store.broadTypeIdentifiers(for: category, includingOptional: includesOptional)
-                    .joined(separator: L10n.string("list.separator"))
-            ))
+            Text(L10n.string("这项修改可能同时影响其他文件格式。"))
+        }
+    }
+
+    private func statusMappingRow(application: ApplicationInfo,
+                                  targets: [String]) -> some View {
+        HStack(spacing: 7) {
+            AppIcon(url: application.url, size: 18)
+                .frame(width: 18)
+            Text(application.name)
+                .font(.caption).lineLimit(1)
+            Image(systemName: "arrow.right")
+                .font(.caption2).foregroundStyle(.tertiary)
+            Text(targets.joined(separator: L10n.string("list.separator")))
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .help(targets.joined(separator: L10n.string("list.separator")))
+            Spacer()
         }
     }
 
@@ -942,8 +916,7 @@ private struct DefaultAppPickerSheet: View {
     }
 
     private var selectionSummaryHeight: CGFloat {
-        guard selectedCandidate != nil else { return 56 }
-        return 138
+        selectedCandidate == nil ? 56 : 82
     }
 
     @ViewBuilder private var selectionSummary: some View {
@@ -951,38 +924,14 @@ private struct DefaultAppPickerSheet: View {
             if let candidate = selectedCandidate {
                 Text(L10n.format("picker.setCategory", candidate.application.name, category.title))
                     .font(.headline)
-                let managedSupportedTargets = candidate.typeDetails.filter {
-                    $0.isSupported && $0.isManaged
-                }.map(\.label).uniquedPreservingOrder()
                 let managedUnsupportedTargets = candidate.typeDetails.filter {
                     !$0.isSupported && $0.isManaged
                 }.map(\.label).uniquedPreservingOrder()
-                Text(L10n.format("picker.willChange", managedSupportedTargets.joined(separator: L10n.string("list.separator"))))
+                Text(L10n.string("将用于打开这个组合中的常见格式。"))
                     .font(.callout).foregroundStyle(.secondary)
-                let estimatedChanges = candidate.typeDetails.filter {
-                    $0.isSupported && !$0.isCurrentDefault && $0.isManaged
-                }.count
-                Text(L10n.format("picker.estimatedChanges", estimatedChanges))
-                    .font(.caption).foregroundStyle(.secondary)
                 if !managedUnsupportedTargets.isEmpty {
-                    Text(L10n.format("picker.unsupportedTargets", managedUnsupportedTargets.joined(separator: L10n.string("list.separator"))))
-                        .font(.callout).foregroundStyle(.orange)
-                }
-                Button {
-                    showsTypeDetails.toggle()
-                } label: {
-                    Label(L10n.string(showsTypeDetails ? "隐藏类型详情" : "显示类型详情"),
-                          systemImage: showsTypeDetails ? "chevron.up" : "chevron.down")
-                }
-                .buttonStyle(.borderless)
-                if showsTypeDetails {
-                    VStack(spacing: 0) {
-                        ForEach(candidate.typeDetails) { detail in
-                            typeDetailRow(detail)
-                            if detail.id != candidate.typeDetails.last?.id { Divider() }
-                        }
-                    }
-                    .id("type-details")
+                    Text(L10n.string("部分格式可能保持原来的设置。"))
+                        .font(.caption).foregroundStyle(.orange)
                 }
             } else {
                 Text(L10n.string("请先选择一个应用。点击应用不会立即修改系统设置。"))
@@ -997,37 +946,6 @@ private struct DefaultAppPickerSheet: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(16)
-    }
-
-    private func typeDetailRow(_ detail: DefaultAppCandidateTypeDetail) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: !detail.isManaged ? "minus.circle.fill"
-                  : detail.isSupported ? "checkmark.circle.fill" : "minus.circle.fill")
-                .foregroundStyle(!detail.isManaged ? Color.secondary
-                                 : detail.isSupported ? Color.green : Color.orange)
-            Text(detail.label).font(.callout.monospaced())
-                .frame(width: 70, alignment: .leading)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(detail.typeName).lineLimit(1)
-                Text(detail.technicalIdentifier)
-                    .font(.caption.monospaced()).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
-            }
-            Spacer()
-            HStack(spacing: 6) {
-                if detail.isCurrentDefault {
-                    Text(L10n.string("当前默认")).font(.caption).foregroundStyle(.green)
-                }
-                if !detail.isManaged {
-                    Text(L10n.string(detail.scopePolicy == .excluded
-                                     ? "已排除此类型" : "候选类型 · 默认不纳入"))
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if !detail.isSupported {
-                    Text(L10n.string("不会修改")).font(.caption).foregroundStyle(.orange)
-                }
-            }
-        }
-        .padding(.vertical, 5)
     }
 
     private var actionBar: some View {
@@ -1052,14 +970,14 @@ private struct DefaultAppPickerSheet: View {
                 if isApplying {
                     ProgressView().controlSize(.small)
                     Text(L10n.string("正在设置…"))
+                } else if selectedCandidate != nil && !selectedCandidateHasPendingChanges {
+                    Text(L10n.string("已是默认"))
                 } else {
                     Text(L10n.format("action.setAsCategory", category.title))
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(selectedCandidate?.typeDetails.contains(where: {
-                $0.isSupported && $0.isManaged
-            }) != true || !hasSettableTargets || isApplying)
+            .disabled(!selectedCandidateHasPendingChanges || !hasSettableTargets || isApplying)
         }
         .padding(16)
     }
@@ -1068,8 +986,16 @@ private struct DefaultAppPickerSheet: View {
         category.optionalExtensions.map { "." + $0 }.joined(separator: L10n.string("list.separator"))
     }
 
-    private func reloadCandidates() {
-        candidates = store.defaultAppCandidates(for: category, includingOptional: includesOptional)
+    private func reloadCandidates() async {
+        isLoadingCandidates = true
+        async let loadedStatus = store.loadDefaultAppStatus(for: category)
+        async let loadedOptionalStatus = store.loadOptionalDefaultAppStatus(for: category)
+        async let loadedCandidates = store.loadDefaultAppCandidates(
+            for: category, includingOptional: includesOptional
+        )
+        currentStatus = await loadedStatus
+        optionalStatus = await loadedOptionalStatus
+        candidates = await loadedCandidates
         if let customApplicationURL {
             do {
                 let candidate = try store.validatedDefaultAppCandidate(
@@ -1085,8 +1011,8 @@ private struct DefaultAppPickerSheet: View {
         if let selectedCandidateID,
            !candidates.contains(where: { $0.id == selectedCandidateID }) {
             self.selectedCandidateID = nil
-            showsTypeDetails = false
         }
+        isLoadingCandidates = false
     }
 
     private func chooseOtherApplication() {
@@ -1147,148 +1073,6 @@ private struct DefaultAppPickerSheet: View {
             } else {
                 isApplying = false
             }
-        }
-    }
-}
-
-private struct DefaultAppCategoryTypeDetailsSheet: View {
-    @EnvironmentObject private var store: AssociationStore
-    @Environment(\.dismiss) private var dismiss
-    let category: DefaultAppCategory
-    let includingOptional: Bool
-
-    private var details: [DefaultAppCategoryTypeDetail] {
-        store.defaultAppTypeDetails(for: category, includingOptional: includingOptional)
-    }
-
-    private var managedCount: Int {
-        details.filter { $0.isManaged && $0.modificationRisk != .protected }.count
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: category.symbol)
-                    .font(.system(size: 24)).foregroundStyle(.tint).frame(width: 36)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(L10n.string("组合类型详情")).font(.title2.weight(.semibold))
-                    Text(category.title).font(.callout).foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(20)
-
-            Divider()
-            VStack(alignment: .leading, spacing: 5) {
-                Text(L10n.string("系统推测类型会自动纳入；其他注册候选默认不纳入。"))
-                Text(L10n.string("可以为整个组合手动纳入或排除某个类型，与选择哪个 App 无关。"))
-                    .foregroundStyle(.secondary)
-                if managedCount == 0 {
-                    Label(L10n.string("当前没有可设置的文件类型。"),
-                          systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange).fontWeight(.medium)
-                }
-            }
-            .font(.callout)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20).padding(.vertical, 12)
-
-            Divider()
-            List(details) { detail in
-                HStack(spacing: 10) {
-                    Image(systemName: iconName(for: detail))
-                        .foregroundStyle(iconColor(for: detail))
-                        .frame(width: 18)
-                    Text(detail.label)
-                        .font(.callout.monospaced())
-                        .frame(width: 100, alignment: .leading)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(detail.typeName).lineLimit(1)
-                        Text(detail.technicalIdentifier)
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.middle)
-                    }
-                    Spacer()
-                    riskLabel(for: detail)
-                    if detail.canCustomizeScope {
-                        Menu {
-                            Button(L10n.string("使用自动范围")) {
-                                store.setDefaultAppType(detail.technicalIdentifier,
-                                                        scopePolicy: .automatic,
-                                                        for: category)
-                            }
-                            Button(L10n.string("手动纳入组合")) {
-                                store.setDefaultAppType(detail.technicalIdentifier,
-                                                        scopePolicy: .included,
-                                                        for: category)
-                            }
-                            Button(L10n.string("从组合中排除")) {
-                                store.setDefaultAppType(detail.technicalIdentifier,
-                                                        scopePolicy: .excluded,
-                                                        for: category)
-                            }
-                        } label: {
-                            Text(scopeLabel(for: detail))
-                        }
-                        .controlSize(.small)
-                        .frame(width: 130, alignment: .trailing)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-            .scrollContentBackground(.hidden)
-
-            Divider()
-            HStack {
-                Text(L10n.format("status.managedTypeCount", managedCount, details.count))
-                    .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                Spacer()
-                Button(L10n.string("关闭")) { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
-        }
-        .frame(width: 720, height: 520)
-        .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
-    }
-
-    private func iconName(for detail: DefaultAppCategoryTypeDetail) -> String {
-        if !detail.isManaged { return "minus.circle.fill" }
-        if detail.modificationRisk == .protected { return "lock.fill" }
-        if detail.modificationRisk == .broad { return "exclamationmark.triangle.fill" }
-        return "checkmark.circle.fill"
-    }
-
-    private func iconColor(for detail: DefaultAppCategoryTypeDetail) -> Color {
-        if !detail.isManaged { return .secondary }
-        if detail.modificationRisk != .normal { return .orange }
-        return .green
-    }
-
-    @ViewBuilder private func riskLabel(for detail: DefaultAppCategoryTypeDetail) -> some View {
-        if detail.scopePolicy == .excluded {
-            Text(L10n.string("已排除")).font(.caption).foregroundStyle(.secondary)
-        } else if detail.scopePolicy == .included {
-            Text(L10n.string("手动纳入")).font(.caption).foregroundStyle(.blue)
-        } else if detail.isAutomaticallyManaged {
-            Text(L10n.string("系统推测")).font(.caption).foregroundStyle(.green)
-        } else if !detail.isManaged {
-            Text(L10n.string("注册候选")).font(.caption).foregroundStyle(.secondary)
-        } else if detail.modificationRisk == .protected {
-            Text(L10n.string("只读基础类型")).font(.caption).foregroundStyle(.orange)
-        } else if detail.modificationRisk == .broad {
-            Text(L10n.string("宽泛类型")).font(.caption).foregroundStyle(.orange)
-        }
-    }
-
-    private func scopeLabel(for detail: DefaultAppCategoryTypeDetail) -> String {
-        switch detail.scopePolicy {
-        case .automatic:
-            L10n.string(detail.isAutomaticallyManaged ? "自动纳入" : "默认不纳入")
-        case .included:
-            L10n.string("手动纳入")
-        case .excluded:
-            L10n.string("已排除")
         }
     }
 }

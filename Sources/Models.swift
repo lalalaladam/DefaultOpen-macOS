@@ -120,13 +120,13 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     }
 }
 
-enum FileTypeModificationRisk: Equatable {
+enum FileTypeModificationRisk: Equatable, Sendable {
     case normal
     case broad
     case protected
 }
 
-struct DefaultAppCategory: Identifiable, Hashable, Codable {
+struct DefaultAppCategory: Identifiable, Hashable, Codable, Sendable {
     let id: String
     let title: String
     let subtitle: String
@@ -177,7 +177,7 @@ struct DefaultAppCategory: Identifiable, Hashable, Codable {
     }
 }
 
-struct DefaultAppCandidate: Identifiable {
+struct DefaultAppCandidate: Identifiable, Sendable {
     let application: ApplicationInfo
     let supportedCount: Int
     let totalCount: Int
@@ -189,13 +189,13 @@ struct DefaultAppCandidate: Identifiable {
     var id: String { application.id }
 }
 
-enum DefaultAppTypeScopePolicy: Equatable {
+enum DefaultAppTypeScopePolicy: Equatable, Sendable {
     case automatic
     case included
     case excluded
 }
 
-struct DefaultAppCandidateTypeDetail: Identifiable {
+struct DefaultAppCandidateTypeDetail: Identifiable, Sendable {
     let id: String
     let label: String
     let typeName: String
@@ -206,9 +206,10 @@ struct DefaultAppCandidateTypeDetail: Identifiable {
     let scopePolicy: DefaultAppTypeScopePolicy
     let isAutomaticallyManaged: Bool
     let isManaged: Bool
+    let canChangeDefault: Bool
 }
 
-struct DefaultAppCategoryTypeDetail: Identifiable {
+struct DefaultAppCategoryTypeDetail: Identifiable, Sendable {
     let id: String
     let label: String
     let typeName: String
@@ -220,19 +221,19 @@ struct DefaultAppCategoryTypeDetail: Identifiable {
     let isManaged: Bool
 }
 
-struct DefaultAppChangeResult {
+struct DefaultAppChangeResult: Sendable {
     let changedTargets: [String]
     let skippedTargets: [String]
     let unchangedTargets: [String]
 }
 
-struct DefaultAppAssignment: Identifiable {
+struct DefaultAppAssignment: Identifiable, Sendable {
     let application: ApplicationInfo
     let targets: [String]
     var id: String { application.id }
 }
 
-struct DefaultAppCategoryStatus {
+struct DefaultAppCategoryStatus: Sendable {
     let unifiedApplication: ApplicationInfo?
     let assignments: [DefaultAppAssignment]
     let missingTargets: [String]

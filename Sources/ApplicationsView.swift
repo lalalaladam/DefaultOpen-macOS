@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ApplicationsView: View {
     @EnvironmentObject private var store: AssociationStore
@@ -64,7 +63,7 @@ struct ApplicationsView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            SearchBox(prompt: "搜索应用、扩展名或 UTType", text: $searchText)
+            SearchBox(prompt: "搜索应用或扩展名", text: $searchText)
             Button { Task { await store.scanApplications() } } label: {
                 Label(LanguageSettings.shared.string(store.isScanning ? "正在扫描…" : "重新扫描"),
                       systemImage: "arrow.clockwise")
@@ -108,7 +107,8 @@ struct ApplicationsView: View {
     @ViewBuilder private var detail: some View {
         if let result = searchResults.first(where: { $0.application.id == selectedAppID }) {
             ApplicationDetailView(application: result.application,
-                                  matchingExtensions: result.matchingExtensions)
+                                  matchingExtensions: result.matchingExtensions,
+                                  bestMatchingExtension: result.bestMatchingExtension)
                 .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ContentUnavailableView(
@@ -125,11 +125,11 @@ private struct ApplicationDetailView: View {
     @EnvironmentObject private var store: AssociationStore
     let application: ApplicationInfo
     let matchingExtensions: Set<String>
+    let bestMatchingExtension: String?
     @State private var selected = Set<String>()
     @State private var sortColumn: ExtensionSortColumn = .extensionName
     @State private var sortAscending = true
     @State private var showsVolumeParts = false
-    @State private var showsDeclarationDetails = false
     @State private var pendingDefaultChange: PendingDefaultChange?
 
     private var rows: [ApplicationExtensionRow] {
@@ -143,14 +143,13 @@ private struct ApplicationDetailView: View {
             }
         }
 
-        return documentsByExtension.compactMap { extensionName, documents in
+        return documentsByExtension.compactMap { extensionName, _ in
             guard let fileType = store.inferredFileType(forExtension: extensionName) else { return nil }
             let current = store.defaultApplication(for: fileType)
             return ApplicationExtensionRow(
                 fileType: fileType,
                 currentDefault: current,
                 isApplicationDefault: current?.bundleIdentifier == application.bundleIdentifier,
-                role: extensionRole(for: documents),
                 isVolumePart: isVolumePartExtension(extensionName)
             )
         }
@@ -164,6 +163,20 @@ private struct ApplicationDetailView: View {
 
     private var visibleRows: [ApplicationExtensionRow] {
         rows.filter { !$0.isVolumePart || showsVolumeParts || matchingExtensions.contains($0.id) }
+    }
+
+    private var selectedRows: [ApplicationExtensionRow] {
+        rows.filter { selected.contains($0.id) }
+    }
+
+    private var selectedRowsAreAllCurrentDefaults: Bool {
+        !selectedRows.isEmpty && selectedRows.allSatisfy(\.isApplicationDefault)
+    }
+
+    private var selectedRowsHavePendingChanges: Bool {
+        selectedRows.contains {
+            !$0.isApplicationDefault && store.modificationRisk(for: $0.fileType) != .protected
+        }
     }
 
     var body: some View {
@@ -180,9 +193,6 @@ private struct ApplicationDetailView: View {
             } else {
                 extensionTable
             }
-        }
-        .sheet(isPresented: $showsDeclarationDetails) {
-            ApplicationDeclarationDetailsView(application: application)
         }
         .confirmationDialog(L10n.string("确认设为默认？"), isPresented: Binding(
             get: { pendingDefaultChange != nil },
@@ -213,11 +223,13 @@ private struct ApplicationDetailView: View {
                     .font(.caption).foregroundStyle(.tertiary)
             }
             Spacer()
-            Button(L10n.string("声明详情…")) { showsDeclarationDetails = true }
-                .buttonStyle(.bordered)
             if !selected.isEmpty {
-                Button(L10n.string("将所选扩展名设为默认")) { makeSelectedDefault() }
+                Button(L10n.string(selectedRowsAreAllCurrentDefaults
+                                   ? "已是默认" : "将所选扩展名设为默认")) {
+                    makeSelectedDefault()
+                }
                     .buttonStyle(.borderedProminent)
+                    .disabled(!selectedRowsHavePendingChanges)
             }
         }
         .padding(20)
@@ -228,15 +240,13 @@ private struct ApplicationDetailView: View {
             let extensionWidth = min(130, max(90, proxy.size.width * 0.16))
             let defaultAppWidth = min(195, max(145, proxy.size.width * 0.24))
             let actionWidth: CGFloat = 78
-            let roleWidth: CGFloat = 66
             let typeWidth = max(160, proxy.size.width - extensionWidth - defaultAppWidth
-                                - actionWidth - roleWidth - 84)
+                                - actionWidth - 72)
 
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     sortableHeader("扩展名", column: .extensionName, width: extensionWidth)
                     sortableHeader("文件类型 / UTType", column: .typeName, width: typeWidth)
-                    Text(L10n.string("角色")).frame(width: roleWidth, alignment: .leading)
                     sortableHeader("当前默认 App", column: .defaultAppName, width: defaultAppWidth)
                     Color.clear.frame(width: actionWidth)
                 }
@@ -248,7 +258,7 @@ private struct ApplicationDetailView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(visibleRows) { row in
                             extensionRow(row, extensionWidth: extensionWidth, typeWidth: typeWidth,
-                                         roleWidth: roleWidth, defaultAppWidth: defaultAppWidth,
+                                         defaultAppWidth: defaultAppWidth,
                                          actionWidth: actionWidth)
                             Divider().padding(.leading, 12)
                         }
@@ -270,7 +280,7 @@ private struct ApplicationDetailView: View {
     }
 
     private func extensionRow(_ row: ApplicationExtensionRow, extensionWidth: CGFloat,
-                              typeWidth: CGFloat, roleWidth: CGFloat,
+                              typeWidth: CGFloat,
                               defaultAppWidth: CGFloat, actionWidth: CGFloat) -> some View {
         HStack(spacing: 12) {
             HStack(spacing: 5) {
@@ -288,8 +298,6 @@ private struct ApplicationDetailView: View {
             }
             .frame(width: typeWidth, alignment: .leading)
             .help("\(row.fileType.displayName)\n\(row.fileType.contentTypeIdentifier)")
-
-            roleBadge(row.role).frame(width: roleWidth, alignment: .leading)
 
             HStack(spacing: 7) {
                 AppIcon(url: row.currentDefault?.url, size: 25)
@@ -309,12 +317,6 @@ private struct ApplicationDetailView: View {
         .background(selected.contains(row.id) ? Color.accentColor.opacity(0.18) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture { selectRow(row.id) }
-    }
-
-    private func roleBadge(_ role: ApplicationExtensionRole) -> some View {
-        Label(L10n.string(role.title), systemImage: role.symbol)
-            .font(.caption2).foregroundStyle(role == .viewer ? Color.orange : Color.secondary)
-            .help(L10n.string(role.helpText))
     }
 
     private func sortableHeader(_ title: String, column: ExtensionSortColumn,
@@ -342,6 +344,10 @@ private struct ApplicationDetailView: View {
     }
 
     private func rowSort(_ lhs: ApplicationExtensionRow, _ rhs: ApplicationExtensionRow) -> Bool {
+        let lhsIsBestMatch = lhs.id == bestMatchingExtension
+        let rhsIsBestMatch = rhs.id == bestMatchingExtension
+        if lhsIsBestMatch != rhsIsBestMatch { return lhsIsBestMatch }
+
         let lhsMatch = matchingExtensions.contains(lhs.id)
         let rhsMatch = matchingExtensions.contains(rhs.id)
         if lhsMatch != rhsMatch { return lhsMatch }
@@ -376,7 +382,7 @@ private struct ApplicationDetailView: View {
             store.errorMessage = L10n.string("基础 UTType 仅供查看，不能修改默认 App。")
             return
         }
-        pendingDefaultChange = PendingDefaultChange(types: [row.fileType], hasViewer: row.role == .viewer)
+        pendingDefaultChange = PendingDefaultChange(types: [row.fileType])
     }
 
     private func makeSelectedDefault() {
@@ -388,10 +394,7 @@ private struct ApplicationDetailView: View {
             store.errorMessage = L10n.string("所选项目包含只读基础 UTType，请取消选择后重试。")
             return
         }
-        pendingDefaultChange = PendingDefaultChange(
-            types: types,
-            hasViewer: chosenRows.contains(where: { $0.role == .viewer })
-        )
+        pendingDefaultChange = PendingDefaultChange(types: types)
     }
 
     private var confirmationMessage: String {
@@ -399,9 +402,6 @@ private struct ApplicationDetailView: View {
         let extensions = change.types.map(\.dottedExtension)
             .joined(separator: L10n.string("list.separator"))
         var message = L10n.format("application.confirmExtensions", application.name, extensions)
-        if change.hasViewer {
-            message += "\n\n" + L10n.string("该 App 将作为查看器打开文件，可能无法编辑或保存。")
-        }
         let broad = change.types.filter { store.modificationRisk(for: $0) == .broad }
         if !broad.isEmpty {
             message += "\n\n" + L10n.format(
@@ -420,101 +420,12 @@ private struct ApplicationDetailView: View {
     }
 }
 
-private struct ApplicationDeclarationDetailsView: View {
-    @Environment(\.dismiss) private var dismiss
-    let application: ApplicationInfo
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                AppIcon(url: application.url, size: 42)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.string("App 声明详情")).font(.title2.weight(.semibold))
-                    Text(application.name).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button(L10n.string("完成")) { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding(18)
-            Divider()
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.string("这里显示 App 的原始格式声明和 Launch Services 能力，仅用于诊断，不决定普通界面的操作范围。"))
-                        .font(.callout).foregroundStyle(.secondary)
-                    ForEach(application.documentTypes) { document in
-                        declarationCard(document)
-                    }
-                }
-                .padding(18)
-            }
-        }
-        .frame(minWidth: 680, minHeight: 520)
-    }
-
-    private func declarationCard(_ document: ApplicationDocumentType) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                Text(document.name).font(.headline)
-                Text(L10n.string(document.source == .bundleDeclaration ? "Bundle 声明" : "Launch Services 能力"))
-                    .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.secondary.opacity(0.12), in: Capsule())
-                Spacer()
-                Text(roleDescription(document.role)).font(.caption).foregroundStyle(.secondary)
-                if let rank = document.handlerRank {
-                    Text(L10n.format("application.handlerRank", rank))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            valueSection("扩展名", values: document.extensions.map { "." + $0 })
-            valueSection("App 明确声明的 UTType", values: document.declaredTypeIdentifiers,
-                         annotatesResolution: true)
-            valueSection("App 声明的 MIME 类型", values: document.mimeTypes)
-            let inferred = document.extensions.compactMap { extensionName -> String? in
-                guard let type = UTType(filenameExtension: extensionName) else { return nil }
-                return ".\(extensionName) → \(type.identifier)"
-            }
-            valueSection("按扩展名设置时使用的系统推测类型", values: inferred)
-        }
-        .padding(14)
-        .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    @ViewBuilder private func valueSection(_ title: String, values: [String],
-                                           annotatesResolution: Bool = false) -> some View {
-        if !values.isEmpty {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(L10n.string(title)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ForEach(values, id: \.self) { value in
-                    HStack(spacing: 7) {
-                        Text(value).font(.caption.monospaced()).textSelection(.enabled)
-                        if annotatesResolution {
-                            let resolved = UTType(value) != nil
-                            Text(L10n.string(resolved ? "系统可解析" : "仅 App 声明，系统当前不可解析"))
-                                .font(.caption2).foregroundStyle(resolved ? Color.secondary : Color.orange)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func roleDescription(_ role: String) -> String {
-        switch role.lowercased() {
-        case "editor": return L10n.string("角色：编辑器")
-        case "viewer": return L10n.string("角色：查看器")
-        case "shell": return L10n.string("角色：Shell")
-        default: return L10n.string("角色：由 Launch Services 提供")
-        }
-    }
-}
-
 private struct ApplicationSearchResult: Identifiable {
     let application: ApplicationInfo
     let subtitle: String
     let rank: Int
     let matchingExtensions: Set<String>
+    let bestMatchingExtension: String?
     var id: String { application.id }
 
     init?(application: ApplicationInfo, query: String) {
@@ -524,31 +435,33 @@ private struct ApplicationSearchResult: Identifiable {
             subtitle = application.bundleIdentifier
             rank = 10
             matchingExtensions = []
+            bestMatchingExtension = nil
             return
         }
 
         let extensionQuery = normalized.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        var matchedExtensions = Set<String>()
-        var declarationMatch = false
+            .lowercased()
+        var exactMatches = Set<String>()
+        var prefixMatches = Set<String>()
         for document in application.documentTypes {
-            for extensionName in document.extensions where
-                extensionName.localizedCaseInsensitiveContains(extensionQuery) {
-                matchedExtensions.insert(extensionName.lowercased())
+            for rawExtension in document.extensions {
+                let extensionName = rawExtension.lowercased()
+                if extensionName == extensionQuery {
+                    exactMatches.insert(extensionName)
+                } else if extensionName.hasPrefix(extensionQuery) {
+                    prefixMatches.insert(extensionName)
+                }
             }
-            declarationMatch = declarationMatch
-                || document.name.localizedCaseInsensitiveContains(normalized)
-                || document.mimeTypes.contains { $0.localizedCaseInsensitiveContains(normalized) }
-                || document.declaredTypeIdentifiers.contains { $0.localizedCaseInsensitiveContains(normalized) }
         }
+        let matchedExtensions = exactMatches.union(prefixMatches)
 
         let nameMatches = application.name.localizedCaseInsensitiveContains(normalized)
             || application.bundleIdentifier.localizedCaseInsensitiveContains(normalized)
             || application.searchAliases.contains { $0.localizedCaseInsensitiveContains(normalized) }
-        guard nameMatches || declarationMatch || !matchedExtensions.isEmpty else { return nil }
+        guard nameMatches || !matchedExtensions.isEmpty else { return nil }
         matchingExtensions = matchedExtensions
-        if let exact = matchedExtensions.first(where: {
-            $0.caseInsensitiveCompare(extensionQuery) == .orderedSame
-        }) {
+        bestMatchingExtension = exactMatches.sorted().first ?? prefixMatches.sorted().first
+        if let exact = exactMatches.sorted().first {
             subtitle = L10n.format("支持打开 %@", "." + exact)
             rank = 0
         } else if nameMatches {
@@ -557,53 +470,22 @@ private struct ApplicationSearchResult: Identifiable {
         } else if let first = matchedExtensions.sorted().first {
             subtitle = L10n.format("支持打开 %@", "." + first)
             rank = 2
-        } else {
-            subtitle = L10n.string("声明信息匹配")
-            rank = 3
-        }
+        } else { return nil }
     }
 }
 
 private enum ExtensionSortColumn { case extensionName, typeName, defaultAppName }
 
-private enum ApplicationExtensionRole: Equatable {
-    case editor, viewer, system
-
-    var title: String {
-        switch self { case .editor: "Editor"; case .viewer: "Viewer"; case .system: "LS" }
-    }
-    var symbol: String {
-        switch self { case .editor: "pencil"; case .viewer: "eye"; case .system: "arrow.up.forward.app" }
-    }
-    var helpText: String {
-        switch self {
-        case .editor: "App 声明可编辑此扩展名"
-        case .viewer: "App 声明只查看此扩展名；仍可设为默认"
-        case .system: "由 Launch Services 提供打开能力"
-        }
-    }
-}
-
 private struct ApplicationExtensionRow: Identifiable {
     let fileType: FileTypeInfo
     let currentDefault: ApplicationInfo?
     let isApplicationDefault: Bool
-    let role: ApplicationExtensionRole
     let isVolumePart: Bool
     var id: String { fileType.extensionName.lowercased() }
 }
 
 private struct PendingDefaultChange {
     let types: [FileTypeInfo]
-    let hasViewer: Bool
-}
-
-private func extensionRole(for documents: [ApplicationDocumentType]) -> ApplicationExtensionRole {
-    if documents.contains(where: { $0.role.caseInsensitiveCompare("Editor") == .orderedSame }) {
-        return .editor
-    }
-    if documents.contains(where: \.isViewer) { return .viewer }
-    return .system
 }
 
 private func isVolumePartExtension(_ extensionName: String) -> Bool {
