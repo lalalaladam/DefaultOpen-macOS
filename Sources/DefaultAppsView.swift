@@ -52,7 +52,13 @@ struct DefaultAppsView: View {
             }
         }
         .sheet(item: $presentedCategory) { category in
-            DefaultAppPickerSheet(category: category) {
+            DefaultAppPickerSheet(
+                category: category,
+                initialCandidates: store.cachedDefaultAppCandidates(
+                    for: category,
+                    includingOptional: false
+                )
+            ) {
                 refreshID = UUID()
             }
             .environmentObject(store)
@@ -83,6 +89,9 @@ struct DefaultAppsView: View {
         } message: {
             Text(L10n.string("只会删除本应用保存的组合，不会撤销已经设置的系统文件关联。"))
         }
+        .task(id: store.defaultAppRevision) {
+            await store.prewarmBuiltInDefaultAppCandidates()
+        }
     }
 }
 
@@ -103,6 +112,10 @@ private struct DefaultAppCategoryCard: View {
 
     private var hasTargets: Bool {
         !category.coreExtensions.isEmpty || !category.urlSchemes.isEmpty
+    }
+
+    private var displayedStatus: DefaultAppCategoryStatus? {
+        category.isCustom ? status : store.defaultAppStatus(for: category)
     }
 
     var body: some View {
@@ -160,6 +173,8 @@ private struct DefaultAppCategoryCard: View {
                 .stroke(.primary.opacity(0.08))
         }
         .task(id: "\(category.id)|\(store.defaultAppRevision)") {
+            guard category.isCustom else { return }
+            status = nil
             status = await store.loadDefaultAppStatus(for: category)
         }
     }
@@ -167,7 +182,8 @@ private struct DefaultAppCategoryCard: View {
     @ViewBuilder private var currentLabel: some View {
         if !hasTargets {
             EmptyView()
-        } else if let status, status.isUnified, let app = status.unifiedApplication {
+        } else if let displayedStatus, displayedStatus.isUnified,
+                  let app = displayedStatus.unifiedApplication {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     AppIcon(url: app.url, size: 20)
@@ -182,7 +198,7 @@ private struct DefaultAppCategoryCard: View {
                 }
             }
             .font(.body.weight(.medium))
-        } else if let status {
+        } else if let status = displayedStatus {
             VStack(alignment: .leading, spacing: 2) {
                 Label(L10n.string("尚未统一"), systemImage: "exclamationmark.circle")
                     .font(.body.weight(.medium)).foregroundStyle(.orange)
@@ -546,6 +562,7 @@ private struct DefaultAppFileTypeSelectionSheet: View {
     let onDone: (Set<String>) -> Void
 
     @State private var searchText = ""
+    @State private var effectiveSearchText = ""
     @State private var showsAllTypes = true
     @State private var selected: Set<String>
 
@@ -555,7 +572,7 @@ private struct DefaultAppFileTypeSelectionSheet: View {
     }
 
     private var rows: [FileTypeInfo] {
-        store.matchingCatalogFileTypes(for: searchText, includeAll: showsAllTypes).sorted {
+        store.matchingCatalogFileTypes(for: effectiveSearchText, includeAll: showsAllTypes).sorted {
             $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending
         }
     }
@@ -578,7 +595,9 @@ private struct DefaultAppFileTypeSelectionSheet: View {
                     Text(L10n.string("所有类型")).tag(true)
                 }
                 .labelsHidden().pickerStyle(.segmented).frame(width: 180)
-                SearchBox(prompt: "搜索扩展名、类型或 UTType", text: $searchText)
+                SearchBox(prompt: "搜索扩展名、类型或 UTType",
+                          text: $searchText,
+                          effectiveText: $effectiveSearchText)
                     .frame(width: 250)
             }
             .padding(20)
@@ -612,7 +631,7 @@ private struct DefaultAppFileTypeSelectionSheet: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if rows.isEmpty {
                 ContentUnavailableView(
-                    L10n.format("search.noResults", searchText),
+                    L10n.format("search.noResults", effectiveSearchText),
                     systemImage: "magnifyingglass",
                     description: Text(L10n.string("请尝试其他搜索关键词。"))
                 )
@@ -662,8 +681,9 @@ private struct DefaultAppFileTypeSelectionSheet: View {
         }
         .frame(width: 760, height: 650)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
-        .task(id: searchText) {
-            if showsAllTypes || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        .task(id: effectiveSearchText) {
+            if showsAllTypes
+                || !effectiveSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await store.loadAllFileTypes()
             }
         }
@@ -696,6 +716,15 @@ private struct DefaultAppPickerSheet: View {
     @State private var currentStatus: DefaultAppCategoryStatus?
     @State private var optionalStatus: DefaultAppCategoryStatus?
     @State private var isLoadingCandidates = true
+
+    init(category: DefaultAppCategory,
+         initialCandidates: [DefaultAppCandidate]?,
+         didChange: @escaping () -> Void) {
+        self.category = category
+        self.didChange = didChange
+        _candidates = State(initialValue: initialCandidates ?? [])
+        _isLoadingCandidates = State(initialValue: initialCandidates == nil)
+    }
 
     private var selectedCandidate: DefaultAppCandidate? {
         candidates.first { $0.id == selectedCandidateID }
@@ -1047,7 +1076,7 @@ private struct DefaultAppPickerSheet: View {
     }
 
     private func reloadCandidates() async {
-        isLoadingCandidates = true
+        if candidates.isEmpty { isLoadingCandidates = true }
         async let loadedStatus = store.loadDefaultAppStatus(for: category)
         async let loadedOptionalStatus = store.loadOptionalDefaultAppStatus(for: category)
         async let loadedCandidates = store.loadDefaultAppCandidates(

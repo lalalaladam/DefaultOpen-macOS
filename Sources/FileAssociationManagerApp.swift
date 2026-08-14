@@ -10,6 +10,7 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: NSWindowController?
     private var aboutWindowController: AboutWindowController?
     private var activationRefreshTask: Task<Void, Never>?
+    private let applicationDirectoryMonitor = ApplicationDirectoryMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(
@@ -21,6 +22,11 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
         setupMainMenu()
         removeLegacySpotlightItems()
         showMainWindow()
+        applicationDirectoryMonitor.start { [weak self] in
+            DispatchQueue.main.async {
+                self?.scheduleExternalRefresh(after: .milliseconds(500))
+            }
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -31,11 +37,15 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        scheduleExternalRefresh(after: .milliseconds(350))
+    }
+
+    private func scheduleExternalRefresh(after delay: Duration) {
         activationRefreshTask?.cancel()
         activationRefreshTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(350))
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
-            await store.refreshExternalDefaultChanges()
+            await store.refreshAfterActivation()
         }
     }
 
@@ -245,6 +255,76 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func languageDidChange(_ notification: Notification) {
         setupMainMenu()
         aboutWindowController?.rebuildContent()
+    }
+}
+
+private final class ApplicationDirectoryMonitor {
+    private let queue = DispatchQueue(label: "com.lalalaladam.DefaultOpen.application-monitor")
+    private var sources: [DispatchSourceFileSystemObject] = []
+    private var pendingUpdate: DispatchWorkItem?
+    private var changeHandler: (() -> Void)?
+
+    func start(changeHandler: @escaping () -> Void) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.changeHandler = changeHandler
+            self.rebuildSources()
+        }
+    }
+
+    private func rebuildSources() {
+        sources.forEach { $0.cancel() }
+        sources.removeAll()
+
+        for directory in monitoredDirectories() {
+            let descriptor = open(directory.path, O_EVTONLY)
+            guard descriptor >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: descriptor,
+                eventMask: [.write, .delete, .rename, .extend, .attrib, .link, .revoke],
+                queue: queue
+            )
+            source.setEventHandler { [weak self] in self?.directoryDidChange() }
+            source.setCancelHandler { close(descriptor) }
+            sources.append(source)
+            source.resume()
+        }
+    }
+
+    private func directoryDidChange() {
+        pendingUpdate?.cancel()
+        let update = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.rebuildSources()
+            self.changeHandler?()
+        }
+        pendingUpdate = update
+        queue.asyncAfter(deadline: .now() + .milliseconds(500), execute: update)
+    }
+
+    private func monitoredDirectories() -> [URL] {
+        let roots = [
+            URL(fileURLWithPath: "/Applications"),
+            URL(fileURLWithPath: "/System/Applications"),
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        ].filter { FileManager.default.fileExists(atPath: $0.path) }
+        return roots + roots.flatMap { childDirectories(in: $0, remainingDepth: 2) }
+    }
+
+    private func childDirectories(in directory: URL, remainingDepth: Int) -> [URL] {
+        guard remainingDepth > 0,
+              let children = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+              ) else { return [] }
+        return children.flatMap { child -> [URL] in
+            guard child.pathExtension.lowercased() != "app",
+                  let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                  values.isDirectory == true,
+                  values.isSymbolicLink != true else { return [] }
+            return [child] + childDirectories(in: child, remainingDepth: remainingDepth - 1)
+        }
     }
 }
 

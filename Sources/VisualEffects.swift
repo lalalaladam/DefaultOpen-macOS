@@ -188,9 +188,14 @@ struct SearchBox: View {
     @EnvironmentObject private var languageSettings: LanguageSettings
     let prompt: String
     @Binding var text: String
+    @Binding var effectiveText: String
+    var debounceMilliseconds = 180
 
     var body: some View {
-        NativeSearchField(prompt: languageSettings.string(prompt), text: $text)
+        NativeSearchField(prompt: languageSettings.string(prompt),
+                          text: $text,
+                          effectiveText: $effectiveText,
+                          debounceMilliseconds: debounceMilliseconds)
             .frame(width: 220, height: 28)
     }
 }
@@ -198,9 +203,13 @@ struct SearchBox: View {
 private struct NativeSearchField: NSViewRepresentable {
     let prompt: String
     @Binding var text: String
+    @Binding var effectiveText: String
+    let debounceMilliseconds: Int
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(text: $text,
+                    effectiveText: $effectiveText,
+                    debounceMilliseconds: debounceMilliseconds)
     }
 
     func makeNSView(context: Context) -> NSSearchField {
@@ -214,21 +223,55 @@ private struct NativeSearchField: NSViewRepresentable {
 
     func updateNSView(_ field: NSSearchField, context: Context) {
         field.placeholderString = prompt
+        context.coordinator.debounceMilliseconds = debounceMilliseconds
         if field.stringValue != text {
             field.stringValue = text
+            context.coordinator.commitImmediately(text)
         }
     }
 
     final class Coordinator: NSObject, NSSearchFieldDelegate {
         @Binding private var text: String
+        @Binding private var effectiveText: String
+        private var pendingUpdate: DispatchWorkItem?
+        var debounceMilliseconds: Int
 
-        init(text: Binding<String>) {
+        init(text: Binding<String>, effectiveText: Binding<String>, debounceMilliseconds: Int) {
             _text = text
+            _effectiveText = effectiveText
+            self.debounceMilliseconds = debounceMilliseconds
         }
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSSearchField else { return }
             text = field.stringValue
+            pendingUpdate?.cancel()
+            guard let editor = field.currentEditor() as? NSTextView,
+                  !editor.hasMarkedText() else { return }
+            if field.stringValue.isEmpty {
+                commitImmediately("")
+                return
+            }
+            let value = field.stringValue
+            let update = DispatchWorkItem { [weak self] in
+                self?.effectiveText = value
+            }
+            pendingUpdate = update
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + .milliseconds(debounceMilliseconds),
+                execute: update
+            )
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            commitImmediately(field.stringValue)
+        }
+
+        func commitImmediately(_ value: String) {
+            pendingUpdate?.cancel()
+            pendingUpdate = nil
+            effectiveText = value
         }
     }
 }

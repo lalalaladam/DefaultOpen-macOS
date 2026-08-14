@@ -3,6 +3,7 @@ import SwiftUI
 struct FileTypesView: View {
     @EnvironmentObject private var store: AssociationStore
     @State private var searchText = ""
+    @State private var effectiveSearchText = ""
     @State private var presentedType: FileTypeInfo?
     @State private var addingExtension = false
     @State private var newExtension = ""
@@ -18,7 +19,7 @@ struct FileTypesView: View {
 
     private var rows: [FileTypeRow] {
         let matches = store.matchingFileTypes(
-            for: searchText,
+            for: effectiveSearchText,
             includeAll: showsAllTypes,
             includesDisplayName: searchIncludesDisplayName,
             includesContentTypeIdentifier: searchIncludesUTType
@@ -111,25 +112,24 @@ struct FileTypesView: View {
                 }
             }
         } message: { Text(L10n.string("输入扩展名，不需要包含句点。")) }
-        .task(id: searchText) {
-            try? await Task.sleep(for: .milliseconds(150))
-            guard !Task.isCancelled else { return }
-            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        .task(id: effectiveSearchText) {
+            if !effectiveSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await store.loadAllFileTypes()
             }
             guard !Task.isCancelled else { return }
-            await store.loadDefaultApplication(matchingExtensionSearch: searchText)
+            await store.loadDefaultApplication(matchingExtensionSearch: effectiveSearchText)
         }
     }
 
     private var fileTypeList: some View {
         GeometryReader { proxy in
-            let extensionWidth: CGFloat = 96
-            let defaultAppWidth = min(220, max(160, proxy.size.width * 0.24))
+            let extensionWidth = min(144, max(124, proxy.size.width * 0.16))
+            let defaultAppWidth = min(250, max(180, proxy.size.width * 0.28))
             let actionWidth: CGFloat = 142
             // Keep a stable gutter for the vertical scroller so its first appearance
             // cannot force the trailing columns to move.
-            let typeWidth = max(180, proxy.size.width - extensionWidth - defaultAppWidth - actionWidth - 88)
+            let typeWidth = min(300, max(180, proxy.size.width - extensionWidth
+                                        - defaultAppWidth - actionWidth - 88))
 
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
@@ -254,7 +254,9 @@ struct FileTypesView: View {
                 .accessibilityHidden(!store.isLoadingFileTypes)
                 .help(L10n.string("正在载入全部类型…"))
             .frame(width: 16, height: 16)
-            SearchBox(prompt: searchPrompt, text: $searchText)
+            SearchBox(prompt: searchPrompt,
+                      text: $searchText,
+                      effectiveText: $effectiveSearchText)
                 .help(L10n.string(searchScopeDescription))
             Menu {
                 Toggle(L10n.string("文件类型名称"), isOn: $searchIncludesDisplayName)
@@ -331,10 +333,11 @@ private struct CustomExtensionsSheet: View {
     @EnvironmentObject private var store: AssociationStore
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
+    @State private var effectiveSearchText = ""
     @State private var typePendingDeletion: FileTypeInfo?
 
     private var types: [FileTypeInfo] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = effectiveSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return store.customFileTypes }
         return store.customFileTypes.filter {
             $0.extensionName.localizedCaseInsensitiveContains(query)
@@ -352,7 +355,9 @@ private struct CustomExtensionsSheet: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
-                SearchBox(prompt: "搜索自定义扩展名", text: $searchText)
+                SearchBox(prompt: "搜索自定义扩展名",
+                          text: $searchText,
+                          effectiveText: $effectiveSearchText)
                     .frame(width: 220)
             }
             .padding(20)
@@ -363,7 +368,7 @@ private struct CustomExtensionsSheet: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if types.isEmpty {
                 ContentUnavailableView(
-                    L10n.format("search.noResults", searchText),
+                    L10n.format("search.noResults", effectiveSearchText),
                     systemImage: "magnifyingglass",
                     description: Text(L10n.string("请尝试其他搜索关键词。"))
                 )

@@ -4,10 +4,12 @@ import SwiftUI
 struct ApplicationsView: View {
     @EnvironmentObject private var store: AssociationStore
     @State private var searchText = ""
+    @State private var effectiveSearchText = ""
     @State private var selectedAppID: String?
+    @State private var showsExtensionSearchProgress = false
 
     private var searchResults: [ApplicationSearchResult] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = effectiveSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         return store.applications.compactMap {
             ApplicationSearchResult(
                 application: $0,
@@ -22,6 +24,10 @@ struct ApplicationsView: View {
     }
 
     private var searchResultIDs: [ApplicationInfo.ID] { searchResults.map(\.application.id) }
+
+    private var isLoadingExtensionSearch: Bool {
+        store.isLoadingApplications(matchingExtensionSearch: effectiveSearchText)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,12 +58,21 @@ struct ApplicationsView: View {
             guard let selectedAppID, !resultIDs.contains(selectedAppID) else { return }
             self.selectedAppID = nil
         }
-        .task(id: searchText) {
+        .task(id: effectiveSearchText) {
             if store.applications.isEmpty { await store.scanApplications() }
-            guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled else { return }
-            await store.loadApplications(matchingExtensionSearch: searchText)
+            guard !effectiveSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            await store.loadApplications(matchingExtensionSearch: effectiveSearchText)
+        }
+        .task(id: isLoadingExtensionSearch) {
+            guard isLoadingExtensionSearch else {
+                showsExtensionSearchProgress = false
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled, isLoadingExtensionSearch else { return }
+            showsExtensionSearchProgress = true
         }
     }
 
@@ -69,10 +84,16 @@ struct ApplicationsView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            SearchBox(prompt: "搜索应用或扩展名", text: $searchText)
-            if store.isLoadingApplications(matchingExtensionSearch: searchText) {
-                ProgressView().controlSize(.small)
+            SearchBox(prompt: "搜索应用或扩展名",
+                      text: $searchText,
+                      effectiveText: $effectiveSearchText,
+                      debounceMilliseconds: 400)
+            ZStack {
+                if showsExtensionSearchProgress {
+                    ProgressView().controlSize(.small)
+                }
             }
+            .frame(width: 16, height: 16)
             Button { Task { await store.scanApplications() } } label: {
                 Label(LanguageSettings.shared.string(store.isScanning ? "正在扫描…" : "重新扫描"),
                       systemImage: "arrow.clockwise")
@@ -92,11 +113,16 @@ struct ApplicationsView: View {
                 HStack(spacing: 10) {
                     AppIcon(url: app.url, size: 34)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(app.name).foregroundStyle(isSelected ? Color.white : Color.primary)
+                        Text(app.name)
+                            .foregroundStyle(isSelected ? Color.white : Color.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                         Text(result.subtitle).font(.caption2)
                             .foregroundStyle(isSelected ? Color.white.opacity(0.82) : Color.secondary)
-                            .lineLimit(1).help(result.subtitle)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
+                    .help("\(app.name)\n\(result.subtitle)")
                 }
                 .padding(.horizontal, 8).padding(.vertical, 7)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,7 +138,7 @@ struct ApplicationsView: View {
             .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
         }
         .scrollContentBackground(.hidden)
-        .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
+        .frame(minWidth: 195, idealWidth: 215, maxWidth: 250)
     }
 
     @ViewBuilder private var detail: some View {
@@ -246,12 +272,14 @@ private struct ApplicationDetailView: View {
 
     private var extensionTable: some View {
         GeometryReader { proxy in
-            let extensionWidth = min(120, max(82, proxy.size.width * 0.14))
-            let sourceWidth: CGFloat = 64
-            let defaultAppWidth = min(185, max(128, proxy.size.width * 0.22))
+            let extensionWidth = min(145, max(112, proxy.size.width * 0.18))
+            let sourceWidth: CGFloat = proxy.size.width < 650 ? 56 : 64
+            let defaultAppWidth = min(230, max(150, proxy.size.width * 0.27))
             let actionWidth: CGFloat = 68
-            let typeWidth = max(140, proxy.size.width - extensionWidth - defaultAppWidth
-                                - sourceWidth - actionWidth - 76)
+            let remainingTypeWidth = proxy.size.width - extensionWidth - defaultAppWidth
+                - sourceWidth - actionWidth - 86
+            let typeWidth = min(280, max(0, remainingTypeWidth))
+            let trailingGapWidth = max(0, remainingTypeWidth - typeWidth)
 
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
@@ -259,6 +287,7 @@ private struct ApplicationDetailView: View {
                     sortableHeader("文件类型 / UTType", column: .typeName, width: typeWidth)
                     sortableHeader("来源", column: .source, width: sourceWidth)
                     sortableHeader("当前默认 App", column: .defaultAppName, width: defaultAppWidth)
+                    Color.clear.frame(width: trailingGapWidth)
                     Color.clear.frame(width: actionWidth)
                 }
                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -271,7 +300,8 @@ private struct ApplicationDetailView: View {
                             extensionRow(row, extensionWidth: extensionWidth, typeWidth: typeWidth,
                                          sourceWidth: sourceWidth,
                                          defaultAppWidth: defaultAppWidth,
-                                         actionWidth: actionWidth)
+                                         actionWidth: actionWidth,
+                                         trailingGapWidth: trailingGapWidth)
                             Divider().padding(.leading, 12)
                         }
                         if hiddenVolumePartCount > 0 {
@@ -294,10 +324,15 @@ private struct ApplicationDetailView: View {
     private func extensionRow(_ row: ApplicationExtensionRow, extensionWidth: CGFloat,
                               typeWidth: CGFloat,
                               sourceWidth: CGFloat,
-                              defaultAppWidth: CGFloat, actionWidth: CGFloat) -> some View {
+                              defaultAppWidth: CGFloat, actionWidth: CGFloat,
+                              trailingGapWidth: CGFloat) -> some View {
         HStack(spacing: 10) {
             HStack(spacing: 5) {
-                Text(row.fileType.dottedExtension).font(.system(.callout, design: .monospaced))
+                Text(row.fileType.dottedExtension)
+                    .font(.system(.callout, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(row.fileType.dottedExtension)
                 if matchingExtensions.contains(row.id) {
                     Image(systemName: "magnifyingglass").font(.caption2).foregroundStyle(.orange)
                 }
@@ -326,6 +361,8 @@ private struct ApplicationDetailView: View {
                 }
             }
             .frame(width: defaultAppWidth, alignment: .leading)
+
+            Color.clear.frame(width: trailingGapWidth)
 
             Button(L10n.string("设为默认")) { makeDefault(row) }
                 .buttonStyle(.borderless)

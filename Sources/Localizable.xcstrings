@@ -447,7 +447,7 @@
     "由 Launch Services 提供打开能力" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Opening capability provided by Launch Services"}}}},
     "修复未生效的默认打开方式" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Fix a Default App That Did Not Take Effect"}}}},
     "当部分同扩展名文件仍使用原来的 App 时，在这里单独修改其系统类型。" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"If some files with the same extension still use the previous app, change their system type here."}}}},
-    "输入扩展名，例如 docx" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Enter an extension, such as docx"}}}},
+    "输入扩展名并按回车，例如 docx" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Enter an extension and press Return, such as docx"}}}},
     "检查" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Check"}}}},
     "没有找到可单独修改的类型" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No Additional Types Found"}}}},
     "advanced.noFallbackTypes" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"macOS 没有为 %@ 返回其他可单独修改的类型。"}},"en":{"stringUnit":{"state":"translated","value":"macOS did not return any other configurable types for %@."}}}},

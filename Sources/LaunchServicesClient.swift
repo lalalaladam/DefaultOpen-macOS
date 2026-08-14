@@ -3,6 +3,12 @@ import CoreServices
 import Foundation
 import UniformTypeIdentifiers
 
+func isUsableApplicationURL(_ url: URL) -> Bool {
+    guard FileManager.default.fileExists(atPath: url.path) else { return false }
+    let components = url.standardizedFileURL.pathComponents
+    return !components.contains(".Trash") && !components.contains(".Trashes")
+}
+
 enum AssociationError: LocalizedError {
     case invalidExtension(String)
     case invalidApplication(URL)
@@ -72,7 +78,8 @@ struct LaunchServicesClient: Sendable {
     func defaultApplication(for type: FileTypeInfo) -> ApplicationInfo? {
         guard let unmanaged = LSCopyDefaultRoleHandlerForContentType(type.contentTypeIdentifier as CFString, .all),
               let bundleID = unmanaged.takeRetainedValue() as String?,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+              let url = resolvedApplicationURL(bundleIdentifier: bundleID, contentType: type),
+              isUsableApplicationURL(url) else { return nil }
         return lightweightApplication(bundleID: bundleID, url: url)
     }
 
@@ -99,7 +106,9 @@ struct LaunchServicesClient: Sendable {
 
     func capableApplicationURLs(forContentType identifier: String) -> [URL] {
         guard let type = UTType(identifier) else { return [] }
-        return NSWorkspace.shared.urlsForApplications(toOpen: type).uniqued(by: { url in
+        return NSWorkspace.shared.urlsForApplications(toOpen: type)
+            .filter(isUsableApplicationURL)
+            .uniqued(by: { url in
             Bundle(url: url)?.bundleIdentifier ?? url.standardizedFileURL.path
         })
     }
@@ -107,7 +116,8 @@ struct LaunchServicesClient: Sendable {
     func defaultApplication(forURLScheme scheme: String) -> ApplicationInfo? {
         guard let unmanaged = LSCopyDefaultHandlerForURLScheme(scheme as CFString),
               let bundleID = unmanaged.takeRetainedValue() as String?,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+              isUsableApplicationURL(url) else { return nil }
         return lightweightApplication(bundleID: bundleID, url: url)
     }
 
@@ -118,6 +128,7 @@ struct LaunchServicesClient: Sendable {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
                 return nil
             }
+            guard isUsableApplicationURL(url) else { return nil }
             return (try? AppScanner().applicationInfo(at: url))
                 ?? lightweightApplication(bundleID: bundleID, url: url)
         }
@@ -173,6 +184,18 @@ struct LaunchServicesClient: Sendable {
             .replacingOccurrences(of: ".app", with: "", options: [.anchored, .backwards])
         let name = localName.isEmpty ? fallbackName : localName
         return ApplicationInfo(bundleIdentifier: bundleID, name: name, url: url, supportedTypes: [])
+    }
+
+    private func resolvedApplicationURL(bundleIdentifier: String,
+                                        contentType: FileTypeInfo) -> URL? {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier),
+           isUsableApplicationURL(url) {
+            return url
+        }
+        guard let type = UTType(contentType.contentTypeIdentifier) else { return nil }
+        return NSWorkspace.shared.urlsForApplications(toOpen: type).first { url in
+            isUsableApplicationURL(url) && Bundle(url: url)?.bundleIdentifier == bundleIdentifier
+        }
     }
 }
 

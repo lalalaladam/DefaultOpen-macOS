@@ -17,7 +17,9 @@ struct AdvancedFeaturesView: View {
             results
         }
         .onChange(of: store.defaultAppRevision) { _, _ in
-            if checkedExtension != nil { checkExtension() }
+            if let checkedExtension {
+                loadExtension(checkedExtension, synchronizeQuery: false)
+            }
         }
         .sheet(item: $typeBeingChanged) { type in
             ApplicationPickerSheet(type: type).environmentObject(store)
@@ -39,7 +41,7 @@ struct AdvancedFeaturesView: View {
 
     private var searchBar: some View {
         HStack(spacing: 10) {
-            TextField(L10n.string("输入扩展名，例如 docx"), text: $extensionQuery)
+            TextField(L10n.string("输入扩展名并按回车，例如 docx"), text: $extensionQuery)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { checkExtension() }
             Button(L10n.string("检查")) { checkExtension() }
@@ -68,7 +70,7 @@ struct AdvancedFeaturesView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.format("advanced.fallbackTypes", "." + normalizedExtension,
+                        Text(L10n.format("advanced.fallbackTypes", "." + (checkedExtension ?? ""),
                                          matches.count))
                             .font(.headline)
                         Text(L10n.string(matches.count == 1
@@ -143,7 +145,11 @@ struct AdvancedFeaturesView: View {
     private func checkExtension() {
         let extensionName = normalizedExtension
         guard !extensionName.isEmpty else { return }
-        extensionQuery = extensionName
+        loadExtension(extensionName, synchronizeQuery: true)
+    }
+
+    private func loadExtension(_ extensionName: String, synchronizeQuery: Bool) {
+        if synchronizeQuery { extensionQuery = extensionName }
         checkedExtension = extensionName
 
         let preferred = store.inferredFileType(forExtension: extensionName)

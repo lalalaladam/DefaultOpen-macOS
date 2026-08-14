@@ -2,6 +2,10 @@ import Foundation
 import UniformTypeIdentifiers
 
 struct AppScanner: Sendable {
+    func applicationBundleSnapshot() -> Set<String> {
+        Set(applicationBundleURLs().map { $0.standardizedFileURL.path })
+    }
+
     func scanInstalledApplications(managedTypes: [FileTypeInfo]) -> [ApplicationInfo] {
         augmentWithLaunchServices(scanApplicationBundles(), managedTypes: managedTypes)
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -35,19 +39,21 @@ struct AppScanner: Sendable {
     }
 
     private func scanApplicationBundles() -> [ApplicationInfo] {
+        var apps: [String: ApplicationInfo] = [:]
+        for url in applicationBundleURLs() {
+            if let app = try? applicationInfo(at: url) { apps[app.bundleIdentifier] = app }
+        }
+        return Array(apps.values)
+    }
+
+    private func applicationBundleURLs() -> [URL] {
         let roots = [
             URL(fileURLWithPath: "/Applications"),
             URL(fileURLWithPath: "/System/Applications"),
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
         ]
-        var apps: [String: ApplicationInfo] = [:]
-
-        for root in roots where FileManager.default.fileExists(atPath: root.path) {
-            for url in applicationURLs(in: root, maximumDepth: 2) {
-                if let app = try? applicationInfo(at: url) { apps[app.bundleIdentifier] = app }
-            }
-        }
-        return Array(apps.values)
+        return roots.filter { FileManager.default.fileExists(atPath: $0.path) }
+            .flatMap { applicationURLs(in: $0, maximumDepth: 2) }
     }
 
     /// Installed applications normally live at the root or one grouping folder below it.

@@ -13,7 +13,7 @@ struct ContentView: View {
 
             HStack(spacing: 0) {
                 SidebarView(selection: $section) { showsSettings = true }
-                    .frame(width: 220)
+                    .frame(width: 180)
                 Divider().opacity(0.45)
                 Group {
                     switch section ?? .fileTypes {

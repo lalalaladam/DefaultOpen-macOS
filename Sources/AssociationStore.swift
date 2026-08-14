@@ -16,6 +16,21 @@ private func fileTypeModificationRisk(forIdentifier identifier: String) -> FileT
     return .normal
 }
 
+private struct CachedDefaultAppStatus {
+    let revision: Int
+    let status: DefaultAppCategoryStatus
+}
+
+private struct CachedDefaultAppCandidates {
+    let revision: Int
+    let candidates: [DefaultAppCandidate]
+}
+
+private struct LoadingDefaultAppCandidates {
+    let revision: Int
+    let task: Task<[DefaultAppCandidate], Never>
+}
+
 @MainActor
 final class AssociationStore: ObservableObject {
     @Published var fileTypes: [FileTypeInfo] = []
@@ -40,9 +55,13 @@ final class AssociationStore: ObservableObject {
     private let includedDefaultAppTypesKey = "includedDefaultAppTypesByCategory"
     private let starterExtensions = ["pdf", "txt", "md", "jpg", "png", "heic", "svg", "zip", "json", "csv", "docx", "xlsx", "pptx", "html", "mp3", "mp4"]
     private var optimisticDefaultAppStatuses: [String: DefaultAppCategoryStatus] = [:]
+    private var builtInDefaultAppStatuses: [String: CachedDefaultAppStatus] = [:]
+    private var defaultAppCandidatesCache: [String: CachedDefaultAppCandidates] = [:]
+    private var loadingDefaultAppCandidates: [String: LoadingDefaultAppCandidates] = [:]
     private var queriedApplicationExtensions = Set<String>()
     private var queriedDefaultContentTypes = Set<String>()
     private var registeredFileTypesByExtension: [String: [FileTypeInfo]] = [:]
+    private var applicationBundleSnapshot: Set<String>?
     private var ignoredDefaultAppTypesByCategory: [String: Set<String>]
     private var includedDefaultAppTypesByCategory: [String: Set<String>]
 
@@ -55,6 +74,7 @@ final class AssociationStore: ObservableObject {
             .sorted { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
         allFileTypes = fileTypes
         refreshDefaults(for: fileTypes)
+        refreshBuiltInDefaultAppStatuses()
     }
 
     func saveCustomDefaultAppCategory(id: String?, title: String, subtitle: String,
@@ -99,7 +119,7 @@ final class AssociationStore: ObservableObject {
         persistCustomDefaultAppCategories()
         pruneDefaultAppTypePolicies(for: category)
         removeOptimisticDefaultAppStatuses(for: category)
-        defaultAppRevision += 1
+        advanceDefaultAppRevision()
         return true
     }
 
@@ -116,12 +136,13 @@ final class AssociationStore: ObservableObject {
         persistIncludedDefaultAppTypes()
         removeOptimisticDefaultAppStatuses(for: category)
         persistCustomDefaultAppCategories()
-        defaultAppRevision += 1
+        advanceDefaultAppRevision()
     }
 
     func scanApplications() async {
         guard !isScanning else { return }
         isScanning = true
+        defer { isScanning = false }
         queriedApplicationExtensions.removeAll()
         loadingApplicationExtensions.removeAll()
         let scanner = self.scanner
@@ -131,27 +152,37 @@ final class AssociationStore: ObservableObject {
             + DefaultAppCategory.all.flatMap { $0.extensions(includingOptional: true) }
             + customDefaultAppCategories.flatMap { $0.extensions(includingOptional: true) }
         ).uniqued()
-        let launchServices = self.launchServices
         let result = await Task.detached(priority: .userInitiated) {
             let scannedApplications = scanner.scanInstalledApplications(managedTypes: managedTypes)
             let capabilities = ApplicationCapabilityIndexer().build(
                 applications: scannedApplications,
                 seedExtensions: seedExtensions
             )
-            let verifiedTypes = capabilities.index.allFileTypes
-            var defaults: [String: ApplicationInfo] = [:]
-            for type in Dictionary(grouping: managedTypes + verifiedTypes,
-                                   by: \FileTypeInfo.contentTypeIdentifier).compactMap(\.value.first) {
-                defaults[type.contentTypeIdentifier] = launchServices.defaultApplication(for: type)
-            }
-            return (capabilities, defaults)
+            return (capabilities, scanner.applicationBundleSnapshot())
         }.value
         applicationCapabilityIndex = result.0.index
         applications = result.0.applications
+        applicationBundleSnapshot = result.1
         registeredFileTypesByExtension.removeAll()
         mergeIntoFileTypeCatalog(result.0.index.allFileTypes)
-        defaultsByContentType.merge(result.1) { _, new in new }
-        isScanning = false
+        await refreshExternalDefaultChanges()
+    }
+
+    func refreshAfterActivation() async {
+        let scanner = self.scanner
+        let currentSnapshot = await Task.detached(priority: .utility) {
+            scanner.applicationBundleSnapshot()
+        }.value
+        guard !Task.isCancelled else { return }
+
+        if let previousSnapshot = applicationBundleSnapshot,
+           previousSnapshot != currentSnapshot {
+            guard !isScanning else { return }
+            await scanApplications()
+        } else {
+            applicationBundleSnapshot = currentSnapshot
+            await refreshExternalDefaultChanges()
+        }
     }
 
     func loadApplications(matchingExtensionSearch searchText: String) async {
@@ -172,8 +203,8 @@ final class AssociationStore: ObservableObject {
             scanner.applicationsCapable(of: fileType)
         }.value
         guard !Task.isCancelled else { return }
-        guard !discovered.isEmpty else { return }
         queriedApplicationExtensions.insert(extensionName)
+        guard !discovered.isEmpty else { return }
         mergeApplications(discovered)
         var updatedIndex = applicationCapabilityIndex
         updatedIndex.insert(fileType, for: discovered.map(\.bundleIdentifier))
@@ -384,7 +415,19 @@ final class AssociationStore: ObservableObject {
         _ = defaultAppRevision
         let statusKey = defaultAppStatusKey(for: category, includingOptional: includingOptional)
         if let optimistic = optimisticDefaultAppStatuses[statusKey] { return optimistic }
-        return systemDefaultAppStatus(for: category, includingOptional: includingOptional)
+        if !category.isCustom,
+           let cached = builtInDefaultAppStatuses[statusKey],
+           cached.revision == defaultAppRevision {
+            return cached.status
+        }
+        let status = systemDefaultAppStatus(for: category, includingOptional: includingOptional)
+        if !category.isCustom {
+            builtInDefaultAppStatuses[statusKey] = CachedDefaultAppStatus(
+                revision: defaultAppRevision,
+                status: status
+            )
+        }
+        return status
     }
 
     func loadDefaultAppStatus(for category: DefaultAppCategory,
@@ -403,11 +446,54 @@ final class AssociationStore: ObservableObject {
     }
 
     func loadDefaultAppCandidates(for category: DefaultAppCategory,
-                                  includingOptional: Bool) async -> [DefaultAppCandidate] {
+                                  includingOptional: Bool,
+                                  priority: TaskPriority = .userInitiated) async -> [DefaultAppCandidate] {
+        let key = defaultAppStatusKey(for: category, includingOptional: includingOptional)
+        if let cached = defaultAppCandidatesCache[key], cached.revision == defaultAppRevision {
+            return cached.candidates
+        }
+        if let loading = loadingDefaultAppCandidates[key], loading.revision == defaultAppRevision {
+            return await loading.task.value
+        }
+        let revision = defaultAppRevision
         let resolver = makeDefaultAppResolver()
-        return await Task.detached(priority: .userInitiated) {
+        let task = Task.detached(priority: priority) {
             resolver.candidates(for: category, includingOptional: includingOptional)
-        }.value
+        }
+        loadingDefaultAppCandidates[key] = LoadingDefaultAppCandidates(
+            revision: revision,
+            task: task
+        )
+        let candidates = await task.value
+        if defaultAppRevision == revision {
+            defaultAppCandidatesCache[key] = CachedDefaultAppCandidates(
+                revision: revision,
+                candidates: candidates
+            )
+        }
+        if loadingDefaultAppCandidates[key]?.revision == revision {
+            loadingDefaultAppCandidates.removeValue(forKey: key)
+        }
+        return candidates
+    }
+
+    func cachedDefaultAppCandidates(for category: DefaultAppCategory,
+                                    includingOptional: Bool) -> [DefaultAppCandidate]? {
+        defaultAppCandidatesCache[
+            defaultAppStatusKey(for: category, includingOptional: includingOptional)
+        ]?.candidates
+    }
+
+    func prewarmBuiltInDefaultAppCandidates() async {
+        for category in DefaultAppCategory.all {
+            guard !Task.isCancelled else { return }
+            _ = await loadDefaultAppCandidates(
+                for: category,
+                includingOptional: false,
+                priority: .utility
+            )
+            await Task.yield()
+        }
     }
 
     func optionalDefaultAppStatus(for category: DefaultAppCategory) -> DefaultAppCategoryStatus {
@@ -631,7 +717,7 @@ final class AssociationStore: ObservableObject {
                     ignoredTypeCount: ignoredCount
                 )
             }
-            defaultAppRevision += 1
+            advanceDefaultAppRevision()
             successMessage = changedTargets.isEmpty
                 ? L10n.format("success.alreadyCategoryDefault", application.name, category.title)
                 : L10n.format("success.setCategoryDefault", application.name, category.title)
@@ -725,7 +811,7 @@ final class AssociationStore: ObservableObject {
                 defaultsByContentType.removeValue(forKey: identifier)
             }
         }
-        defaultAppRevision += 1
+        advanceDefaultAppRevision()
     }
 
     func fileTypes(for supportedType: SupportedType) -> [FileTypeInfo] {
@@ -1050,7 +1136,7 @@ final class AssociationStore: ObservableObject {
         persistIgnoredDefaultAppTypes()
         persistIncludedDefaultAppTypes()
         removeOptimisticDefaultAppStatuses(for: category)
-        defaultAppRevision += 1
+        advanceDefaultAppRevision()
     }
 
     private func managedDefaultAppTargets(_ targets: [DefaultAppTarget],
@@ -1121,6 +1207,21 @@ final class AssociationStore: ObservableObject {
         "\(category.id)|\(includingOptional ? "all" : "core")"
     }
 
+    private func advanceDefaultAppRevision() {
+        defaultAppRevision += 1
+        refreshBuiltInDefaultAppStatuses()
+    }
+
+    private func refreshBuiltInDefaultAppStatuses() {
+        for category in DefaultAppCategory.all {
+            let key = defaultAppStatusKey(for: category, includingOptional: false)
+            builtInDefaultAppStatuses[key] = CachedDefaultAppStatus(
+                revision: defaultAppRevision,
+                status: systemDefaultAppStatus(for: category, includingOptional: false)
+            )
+        }
+    }
+
     private func removeOptimisticDefaultAppStatuses(for category: DefaultAppCategory) {
         let prefix = category.id + "|"
         optimisticDefaultAppStatuses = optimisticDefaultAppStatuses.filter {
@@ -1141,12 +1242,12 @@ final class AssociationStore: ObservableObject {
                 let status = self.systemDefaultAppStatus(for: category, includingOptional: includingOptional)
                 if status.unifiedApplication?.bundleIdentifier == application.bundleIdentifier {
                     self.optimisticDefaultAppStatuses.removeValue(forKey: statusKey)
-                    self.defaultAppRevision += 1
+                    self.advanceDefaultAppRevision()
                     return
                 }
             }
             self.optimisticDefaultAppStatuses.removeValue(forKey: statusKey)
-            self.defaultAppRevision += 1
+            self.advanceDefaultAppRevision()
             let finalStatus = self.systemDefaultAppStatus(for: category, includingOptional: includingOptional)
             if finalStatus.unifiedApplication?.bundleIdentifier != application.bundleIdentifier {
                 self.errorMessage = L10n.format("error.unifiedUpdateFailed", category.title)
