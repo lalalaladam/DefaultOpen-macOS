@@ -29,6 +29,8 @@ final class AssociationStore: ObservableObject {
     @Published var successMessage: String?
     @Published private(set) var defaultsByContentType: [String: ApplicationInfo] = [:]
     @Published private(set) var customDefaultAppCategories: [DefaultAppCategory] = []
+    @Published private(set) var applicationCapabilityIndex = ApplicationCapabilityIndex()
+    @Published private(set) var loadingApplicationExtensions = Set<String>()
 
     private let launchServices = LaunchServicesClient()
     private let scanner = AppScanner()
@@ -120,22 +122,34 @@ final class AssociationStore: ObservableObject {
     func scanApplications() async {
         guard !isScanning else { return }
         isScanning = true
+        queriedApplicationExtensions.removeAll()
+        loadingApplicationExtensions.removeAll()
         let scanner = self.scanner
         let managedTypes = fileTypes
+        let seedExtensions = (
+            managedTypes.map(\.extensionName)
+            + DefaultAppCategory.all.flatMap { $0.extensions(includingOptional: true) }
+            + customDefaultAppCategories.flatMap { $0.extensions(includingOptional: true) }
+        ).uniqued()
         let launchServices = self.launchServices
         let result = await Task.detached(priority: .userInitiated) {
-            let apps = scanner.scanInstalledApplications(managedTypes: managedTypes)
-            let discoveredTypes = apps.flatMap(\.supportedTypes).flatMap(\.fileTypes)
+            let scannedApplications = scanner.scanInstalledApplications(managedTypes: managedTypes)
+            let capabilities = ApplicationCapabilityIndexer().build(
+                applications: scannedApplications,
+                seedExtensions: seedExtensions
+            )
+            let verifiedTypes = capabilities.index.allFileTypes
             var defaults: [String: ApplicationInfo] = [:]
-            for type in Dictionary(grouping: managedTypes + discoveredTypes,
+            for type in Dictionary(grouping: managedTypes + verifiedTypes,
                                    by: \FileTypeInfo.contentTypeIdentifier).compactMap(\.value.first) {
                 defaults[type.contentTypeIdentifier] = launchServices.defaultApplication(for: type)
             }
-            return (apps, defaults)
+            return (capabilities, defaults)
         }.value
-        applications = result.0
+        applicationCapabilityIndex = result.0.index
+        applications = result.0.applications
         registeredFileTypesByExtension.removeAll()
-        mergeIntoFileTypeCatalog(result.0.flatMap(\.supportedTypes).flatMap(\.fileTypes))
+        mergeIntoFileTypeCatalog(result.0.index.allFileTypes)
         defaultsByContentType.merge(result.1) { _, new in new }
         isScanning = false
     }
@@ -147,26 +161,40 @@ final class AssociationStore: ObservableObject {
         guard !extensionName.isEmpty,
               extensionName.count <= 32,
               !extensionName.contains(where: { $0.isWhitespace || $0 == "." }),
-              !queriedApplicationExtensions.contains(extensionName) else { return }
+              !queriedApplicationExtensions.contains(extensionName),
+              !loadingApplicationExtensions.contains(extensionName),
+              let fileType = try? launchServices.fileType(for: extensionName) else { return }
 
-        queriedApplicationExtensions.insert(extensionName)
-        let fileTypes = (try? launchServices.fileTypes(for: extensionName)) ?? []
-        guard !fileTypes.isEmpty else { return }
+        loadingApplicationExtensions.insert(extensionName)
+        defer { loadingApplicationExtensions.remove(extensionName) }
         let scanner = self.scanner
         let discovered = await Task.detached(priority: .userInitiated) {
-            fileTypes.flatMap { scanner.applicationsCapable(of: $0) }
+            scanner.applicationsCapable(of: fileType)
         }.value
+        guard !Task.isCancelled else { return }
         guard !discovered.isEmpty else { return }
+        queriedApplicationExtensions.insert(extensionName)
         mergeApplications(discovered)
-        if let representative = fileTypes.first,
-           UTType(representative.contentTypeIdentifier)?.isDynamic == false {
-            mergeIntoFileTypeCatalog([representative])
+        var updatedIndex = applicationCapabilityIndex
+        updatedIndex.insert(fileType, for: discovered.map(\.bundleIdentifier))
+        applicationCapabilityIndex = updatedIndex
+        if UTType(fileType.contentTypeIdentifier)?.isDynamic == false {
+            mergeIntoFileTypeCatalog([fileType])
         }
-        for fileType in fileTypes {
-            if let defaultApplication = launchServices.defaultApplication(for: fileType) {
-                defaultsByContentType[fileType.contentTypeIdentifier] = defaultApplication
-            }
+        if let defaultApplication = launchServices.defaultApplication(for: fileType) {
+            defaultsByContentType[fileType.contentTypeIdentifier] = defaultApplication
         }
+    }
+
+    func verifiedFileTypes(for application: ApplicationInfo) -> [FileTypeInfo] {
+        applicationCapabilityIndex.fileTypes(for: application.bundleIdentifier)
+    }
+
+    func isLoadingApplications(matchingExtensionSearch searchText: String) -> Bool {
+        let extensionName = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        return loadingApplicationExtensions.contains(extensionName)
     }
 
     func loadDefaultApplication(matchingExtensionSearch searchText: String) async {
@@ -529,35 +557,28 @@ final class AssociationStore: ObservableObject {
             var unchangedTargets: [String] = []
             var operations: [DefaultChangeOperation] = []
 
-            for scheme in category.urlSchemes {
-                let label = scheme.uppercased()
-                if launchServices.defaultApplication(forURLScheme: scheme)?.bundleIdentifier
-                    == application.bundleIdentifier {
-                    unchangedTargets.append(label)
+            let targets = defaultAppTargets(for: category, includingOptional: includingOptional,
+                                            includeCapabilities: false)
+                .filter { isDefaultAppTargetManaged($0, for: category) }
+            for target in targets {
+                if target.defaultApplication?.bundleIdentifier == application.bundleIdentifier {
+                    unchangedTargets.append(target.label)
                     continue
                 }
-                guard applicationSupports(application, urlScheme: scheme) else {
-                    skippedTargets.append(label)
+                if let type = target.fileType, modificationRisk(for: type) == .protected {
+                    skippedTargets.append(target.label)
                     continue
                 }
-                operations.append(.scheme(scheme, label))
-            }
-
-            for type in resolvedFileTypes(for: category, includingOptional: includingOptional)
-                where isDefaultAppTypeManaged(type.contentTypeIdentifier, for: category) {
-                if modificationRisk(for: type) == .protected {
-                    skippedTargets.append(type.dottedExtension)
+                guard applicationSupports(application, target: target) else {
+                    skippedTargets.append(target.label)
                     continue
                 }
-                if launchServices.defaultApplication(for: type)?.bundleIdentifier == application.bundleIdentifier {
-                    unchangedTargets.append(type.dottedExtension)
-                    continue
+                switch target.kind {
+                case .urlScheme(let scheme):
+                    operations.append(.scheme(scheme, target.label))
+                case .fileType(let type):
+                    operations.append(.fileType(type, target.label))
                 }
-                guard applicationSupports(application, fileType: type) else {
-                    skippedTargets.append(type.dottedExtension)
-                    continue
-                }
-                operations.append(.fileType(type))
             }
 
             guard !operations.isEmpty || !unchangedTargets.isEmpty else {
@@ -573,19 +594,16 @@ final class AssociationStore: ObservableObject {
                 case .scheme(let scheme, let label):
                     try await launchServices.setDefaultAwaitingConsent(application, forURLScheme: scheme)
                     changedTargets.append(label)
-                case .fileType(let type):
+                case .fileType(let type, let label):
                     try await launchServices.setDefaultAwaitingConsent(application, for: type)
                     changedTypes.append(type)
-                    changedTargets.append(type.dottedExtension)
+                    changedTargets.append(label)
                 }
             }
 
             refreshDefaults(for: changedTypes)
             let statusKey = defaultAppStatusKey(for: category, includingOptional: includingOptional)
-            let selectedLabels = defaultAppTargets(for: category, includingOptional: includingOptional,
-                                                   includeCapabilities: false)
-                .filter { isDefaultAppTargetManaged($0, for: category) }
-                .map(\.label).uniqued()
+            let selectedLabels = targets.map(\.label).uniqued()
             let ignoredCount = ignoredTypeCount(
                 in: defaultAppTargets(for: category, includingOptional: includingOptional,
                                       includeCapabilities: false),
@@ -830,15 +848,27 @@ final class AssociationStore: ObservableObject {
     }
 
     private func mergeApplications(_ discovered: [ApplicationInfo]) {
-        var merged = Dictionary(uniqueKeysWithValues: applications.map { ($0.bundleIdentifier, $0) })
+        var merged: [String: ApplicationInfo] = [:]
+        for application in applications {
+            merged[application.bundleIdentifier] = application
+        }
         for application in discovered {
             guard let existing = merged[application.bundleIdentifier] else {
                 merged[application.bundleIdentifier] = application
                 continue
             }
-            var types = Dictionary(
-                uniqueKeysWithValues: existing.supportedTypes.map { ($0.contentTypeIdentifier, $0) }
-            )
+            var types: [String: SupportedType] = [:]
+            for type in existing.supportedTypes {
+                if let previous = types[type.contentTypeIdentifier] {
+                    types[type.contentTypeIdentifier] = SupportedType(
+                        contentTypeIdentifier: previous.contentTypeIdentifier,
+                        extensions: (previous.extensions + type.extensions).uniqued().sorted(),
+                        displayName: previous.displayName
+                    )
+                } else {
+                    types[type.contentTypeIdentifier] = type
+                }
+            }
             for type in application.supportedTypes {
                 if let previous = types[type.contentTypeIdentifier] {
                     types[type.contentTypeIdentifier] = SupportedType(
@@ -869,9 +899,7 @@ final class AssociationStore: ObservableObject {
 
     private func mergeDocumentTypes(_ existing: [ApplicationDocumentType],
                                     _ discovered: [ApplicationDocumentType]) -> [ApplicationDocumentType] {
-        var merged = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
-        for document in discovered { merged[document.id] = document }
-        return merged.values.sorted {
+        coalescedApplicationDocumentTypes(existing + discovered).sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }
@@ -885,13 +913,7 @@ final class AssociationStore: ObservableObject {
     }
 
     private func candidateFileTypes(forExtensions extensions: [String]) -> [FileTypeInfo] {
-        extensions.flatMap { ext in
-            var types: [FileTypeInfo] = []
-            if let inferred = try? launchServices.fileType(for: ext) { types.append(inferred) }
-            types += (try? launchServices.fileTypes(for: ext)) ?? []
-            return Dictionary(grouping: types, by: \.contentTypeIdentifier)
-                .compactMap(\.value.first)
-        }
+        extensions.compactMap { try? launchServices.fileType(for: $0) }
     }
 
     private func defaultAppTargets(for category: DefaultAppCategory,
@@ -975,8 +997,8 @@ final class AssociationStore: ObservableObject {
             scopePolicy: scopePolicy,
             isAutomaticallyManaged: isAutomaticallyManaged,
             isManaged: !canCustomizeScope || isDefaultAppTypeManaged(identifier, for: category),
-            canChangeDefault: applicationSupports(application, target: target)
-                && (!canCustomizeScope || isDefaultAppTypeManaged(identifier, for: category))
+            canChangeDefault: (!canCustomizeScope
+                || isDefaultAppTypeManaged(identifier, for: category))
                 && (target.fileType.map { modificationRisk(for: $0) != .protected } ?? true)
         )
     }
@@ -1059,28 +1081,14 @@ final class AssociationStore: ObservableObject {
     }
 
     private func applicationSupports(_ application: ApplicationInfo, urlScheme: String) -> Bool {
-        if launchServices.capableApplications(forURLScheme: urlScheme)
-            .contains(where: { $0.bundleIdentifier == application.bundleIdentifier }) {
-            return true
-        }
-        return scanner.supportedURLSchemes(at: application.url).contains(urlScheme.lowercased())
+        launchServices.application(application.bundleIdentifier, canOpenURLScheme: urlScheme)
     }
 
     private func applicationSupports(_ application: ApplicationInfo, fileType: FileTypeInfo) -> Bool {
-        if launchServices.capableBundleIdentifiers(forContentType: fileType.contentTypeIdentifier)
-            .contains(application.bundleIdentifier) {
-            return true
-        }
-        if application.documentTypes.contains(where: {
-            $0.extensions.contains { $0.caseInsensitiveCompare(fileType.extensionName) == .orderedSame }
-        }) {
-            return true
-        }
-        guard let requestedType = UTType(fileType.contentTypeIdentifier) else { return false }
-        return application.supportedTypes.contains { supported in
-            guard let declaredType = UTType(supported.contentTypeIdentifier) else { return false }
-            return requestedType == declaredType || requestedType.conforms(to: declaredType)
-        }
+        launchServices.application(
+            application.bundleIdentifier,
+            canOpenContentType: fileType.contentTypeIdentifier
+        )
     }
 
     private func defaultAppStatusKey(for category: DefaultAppCategory,
@@ -1205,12 +1213,12 @@ private enum DefaultAppTargetKind {
 
 private enum DefaultChangeOperation {
     case scheme(String, String)
-    case fileType(FileTypeInfo)
+    case fileType(FileTypeInfo, String)
 
     var label: String {
         switch self {
         case .scheme(_, let label): label
-        case .fileType(let type): type.dottedExtension
+        case .fileType(_, let label): label
         }
     }
 }
@@ -1219,7 +1227,6 @@ private struct DefaultAppResolver: Sendable {
     let ignoredTypes: [String: Set<String>]
     let includedTypes: [String: Set<String>]
     private let launchServices = LaunchServicesClient()
-    private let scanner = AppScanner()
 
     func status(for category: DefaultAppCategory,
                 includingOptional: Bool) -> DefaultAppCategoryStatus {
@@ -1347,15 +1354,11 @@ private struct DefaultAppResolver: Sendable {
         var typeByIdentifier: [String: FileTypeInfo] = [:]
         var labelsByIdentifier: [String: [String]] = [:]
         for extensionName in category.extensions(includingOptional: includingOptional) {
-            var types: [FileTypeInfo] = []
-            if let inferred = try? launchServices.fileType(for: extensionName) { types.append(inferred) }
-            types += (try? launchServices.fileTypes(for: extensionName)) ?? []
-            for type in Dictionary(grouping: types, by: \.contentTypeIdentifier).compactMap(\.value.first) {
-                let identifier = type.contentTypeIdentifier
-                if typeByIdentifier[identifier] == nil { order.append(identifier) }
-                typeByIdentifier[identifier] = type
-                labelsByIdentifier[identifier, default: []].append("." + extensionName)
-            }
+            guard let type = try? launchServices.fileType(for: extensionName) else { continue }
+            let identifier = type.contentTypeIdentifier
+            if typeByIdentifier[identifier] == nil { order.append(identifier) }
+            typeByIdentifier[identifier] = type
+            labelsByIdentifier[identifier, default: []].append("." + extensionName)
         }
         result += order.compactMap { identifier in
             guard let type = typeByIdentifier[identifier] else { return nil }
@@ -1398,8 +1401,7 @@ private struct DefaultAppResolver: Sendable {
             canCustomizeScope: canCustomize, scopePolicy: policy,
             isAutomaticallyManaged: automatic,
             isManaged: !canCustomize || isManaged(identifier, for: category),
-            canChangeDefault: supports(application, target: target)
-                && (!canCustomize || isManaged(identifier, for: category))
+            canChangeDefault: (!canCustomize || isManaged(identifier, for: category))
                 && (target.fileType.map {
                     fileTypeModificationRisk(forIdentifier: $0.contentTypeIdentifier) != .protected
                 } ?? true)
@@ -1409,22 +1411,15 @@ private struct DefaultAppResolver: Sendable {
     private func supports(_ application: ApplicationInfo, target: DefaultAppTarget) -> Bool {
         switch target.kind {
         case .urlScheme(let scheme):
-            if launchServices.capableApplications(forURLScheme: scheme)
-                .contains(where: { $0.bundleIdentifier == application.bundleIdentifier }) { return true }
-            return scanner.supportedURLSchemes(at: application.url).contains(scheme.lowercased())
+            return launchServices.application(
+                application.bundleIdentifier,
+                canOpenURLScheme: scheme
+            )
         case .fileType(let fileType):
-            if launchServices.capableBundleIdentifiers(forContentType: fileType.contentTypeIdentifier)
-                .contains(application.bundleIdentifier) { return true }
-            if application.documentTypes.contains(where: { document in
-                document.extensions.contains {
-                    $0.caseInsensitiveCompare(fileType.extensionName) == .orderedSame
-                }
-            }) { return true }
-            guard let requested = UTType(fileType.contentTypeIdentifier) else { return false }
-            return application.supportedTypes.contains { supported in
-                guard let declared = UTType(supported.contentTypeIdentifier) else { return false }
-                return requested == declared || requested.conforms(to: declared)
-            }
+            return launchServices.application(
+                application.bundleIdentifier,
+                canOpenContentType: fileType.contentTypeIdentifier
+            )
         }
     }
 

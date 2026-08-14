@@ -686,14 +686,12 @@ private struct DefaultAppPickerSheet: View {
 
     private var hasSettableTargets: Bool {
         candidates.contains { candidate in
-            candidate.typeDetails.contains { $0.canChangeDefault }
+            candidate.typeDetails.contains { $0.canChangeDefault && $0.isSupported }
         }
     }
 
     private var selectedCandidateHasPendingChanges: Bool {
-        selectedCandidate?.typeDetails.contains {
-            $0.canChangeDefault && !$0.isCurrentDefault
-        } == true
+        (selectedCandidate?.pendingDefaultChangeCount ?? 0) > 0
     }
 
     var body: some View {
@@ -712,7 +710,9 @@ private struct DefaultAppPickerSheet: View {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(L10n.string("当前状态：")).foregroundStyle(.secondary)
+                    Text(L10n.string(category.hasOptionalExtensions
+                                     ? "主要格式状态：" : "当前状态："))
+                        .foregroundStyle(.secondary)
                     if let app = currentStatus?.unifiedApplication {
                         AppIcon(url: app.url, size: 20)
                         Text(app.name).fontWeight(.medium)
@@ -834,9 +834,16 @@ private struct DefaultAppPickerSheet: View {
                                     dimensions[.leading]
                                 }
                                 Spacer()
-                                if candidate.isCurrentDefault {
-                                    Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
-                                        .font(.callout.weight(.medium)).foregroundStyle(.green)
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    if candidate.isCurrentDefault {
+                                        Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")
+                                            .font(.callout.weight(.medium)).foregroundStyle(.green)
+                                    }
+                                    Text(L10n.format("status.supportedFraction",
+                                                     candidate.settableSupportedCount,
+                                                     candidate.settableTargetCount))
+                                        .font(.callout.monospacedDigit())
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                             .padding(.vertical, 4)
@@ -860,7 +867,7 @@ private struct DefaultAppPickerSheet: View {
 
             Divider()
             selectionSummary
-                .frame(height: selectionSummaryHeight)
+                .frame(minHeight: selectionSummaryHeight)
 
             Divider()
             actionBar
@@ -916,7 +923,7 @@ private struct DefaultAppPickerSheet: View {
     }
 
     private var selectionSummaryHeight: CGFloat {
-        selectedCandidate == nil ? 56 : 82
+        selectedCandidate == nil ? 56 : 104
     }
 
     @ViewBuilder private var selectionSummary: some View {
@@ -924,14 +931,25 @@ private struct DefaultAppPickerSheet: View {
             if let candidate = selectedCandidate {
                 Text(L10n.format("picker.setCategory", candidate.application.name, category.title))
                     .font(.headline)
-                let managedUnsupportedTargets = candidate.typeDetails.filter {
-                    !$0.isSupported && $0.isManaged
-                }.map(\.label).uniquedPreservingOrder()
-                Text(L10n.string("将用于打开这个组合中的常见格式。"))
+                Text(L10n.format("picker.supportSummary",
+                                 candidate.settableSupportedCount,
+                                 candidate.settableUnsupportedCount))
                     .font(.callout).foregroundStyle(.secondary)
-                if !managedUnsupportedTargets.isEmpty {
-                    Text(L10n.string("部分格式可能保持原来的设置。"))
+                Text(candidate.pendingDefaultChangeCount == 0
+                     ? L10n.string("picker.noEstimatedConfirmations")
+                     : L10n.format("picker.estimatedConfirmations",
+                                   candidate.pendingDefaultChangeCount))
+                    .font(.caption).foregroundStyle(.secondary)
+                if !candidate.settableUnsupportedTargets.isEmpty {
+                    Text(L10n.format(
+                        "picker.unsupportedTargets",
+                        candidate.settableUnsupportedTargets.joined(
+                            separator: L10n.string("list.separator"))
+                    ))
                         .font(.caption).foregroundStyle(.orange)
+                        .lineLimit(2)
+                        .help(candidate.settableUnsupportedTargets.joined(
+                            separator: L10n.string("list.separator")))
                 }
             } else {
                 Text(L10n.string("请先选择一个应用。点击应用不会立即修改系统设置。"))
@@ -1042,8 +1060,8 @@ private struct DefaultAppPickerSheet: View {
         candidates.removeAll { $0.id == candidate.id }
         candidates.append(candidate)
         candidates.sort {
-            if $0.supportedCount != $1.supportedCount {
-                return $0.supportedCount > $1.supportedCount
+            if $0.settableSupportedCount != $1.settableSupportedCount {
+                return $0.settableSupportedCount > $1.settableSupportedCount
             }
             return $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending
         }
@@ -1074,6 +1092,33 @@ private struct DefaultAppPickerSheet: View {
                 isApplying = false
             }
         }
+    }
+}
+
+private extension DefaultAppCandidate {
+    var settableTypeDetails: [DefaultAppCandidateTypeDetail] {
+        typeDetails.filter(\.canChangeDefault)
+    }
+
+    var settableTargetCount: Int {
+        settableTypeDetails.count
+    }
+
+    var settableSupportedCount: Int {
+        settableTypeDetails.filter(\.isSupported).count
+    }
+
+    var settableUnsupportedCount: Int {
+        settableTargetCount - settableSupportedCount
+    }
+
+    var pendingDefaultChangeCount: Int {
+        settableTypeDetails.filter { $0.isSupported && !$0.isCurrentDefault }.count
+    }
+
+    var settableUnsupportedTargets: [String] {
+        settableTypeDetails.filter { !$0.isSupported }
+            .map(\.label).uniquedPreservingOrder()
     }
 }
 

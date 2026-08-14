@@ -30,7 +30,7 @@ struct AppScanner: Sendable {
         )
         return client.capableApplicationURLs(forContentType: fileType.contentTypeIdentifier).compactMap { url in
             guard let application = try? applicationInfo(at: url) else { return nil }
-            return merging(inferredType, into: application)
+            return mergingVerifiedCapability(inferredType, into: application)
         }
     }
 
@@ -80,16 +80,25 @@ struct AppScanner: Sendable {
     /// document type block we can parse while still being registered as a PDF handler).
     private func augmentWithLaunchServices(_ applications: [ApplicationInfo], managedTypes: [FileTypeInfo]) -> [ApplicationInfo] {
         let client = LaunchServicesClient()
-        var discoveredApplications = Dictionary(
-            uniqueKeysWithValues: applications.map { ($0.bundleIdentifier, $0) }
-        )
+        var discoveredApplications: [String: ApplicationInfo] = [:]
+        for application in applications {
+            discoveredApplications[application.bundleIdentifier] = application
+        }
         var knownTypes: [String: SupportedType] = [:]
         for type in managedTypes {
-            knownTypes[type.contentTypeIdentifier] = SupportedType(
-                contentTypeIdentifier: type.contentTypeIdentifier,
-                extensions: [type.extensionName],
-                displayName: type.displayName
-            )
+            if let existing = knownTypes[type.contentTypeIdentifier] {
+                knownTypes[type.contentTypeIdentifier] = SupportedType(
+                    contentTypeIdentifier: existing.contentTypeIdentifier,
+                    extensions: normalize(existing.extensions + [type.extensionName]),
+                    displayName: existing.displayName
+                )
+            } else {
+                knownTypes[type.contentTypeIdentifier] = SupportedType(
+                    contentTypeIdentifier: type.contentTypeIdentifier,
+                    extensions: [type.extensionName],
+                    displayName: type.displayName
+                )
+            }
         }
 
         var inferred: [String: [SupportedType]] = [:]
@@ -119,12 +128,8 @@ struct AppScanner: Sendable {
             }
             let supplementalDocuments: [ApplicationDocumentType] = inferred[
                 app.bundleIdentifier, default: []
-            ].compactMap { type -> ApplicationDocumentType? in
-                guard !app.documentTypes.contains(where: {
-                    $0.extensions.contains(where: type.extensions.contains)
-                        || $0.declaredTypeIdentifiers.contains(type.contentTypeIdentifier)
-                }) else { return nil }
-                return ApplicationDocumentType(
+            ].map { type in
+                ApplicationDocumentType(
                     id: "launch-services:\(type.contentTypeIdentifier)",
                     name: type.displayName,
                     extensions: type.extensions,
@@ -136,7 +141,9 @@ struct AppScanner: Sendable {
                 )
             }
             return ApplicationInfo(bundleIdentifier: app.bundleIdentifier, name: app.name, url: app.url,
-                                   documentTypes: app.documentTypes + supplementalDocuments,
+                                   documentTypes: coalescedApplicationDocumentTypes(
+                                    app.documentTypes + supplementalDocuments
+                                   ),
                                    supportedTypes: merged.values.sorted {
                 $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
             }, searchAliases: app.searchAliases)
@@ -250,8 +257,8 @@ struct AppScanner: Sendable {
         return role != "none" && role != "qlgenerator" && rank != "none"
     }
 
-    private func merging(_ inferredType: SupportedType,
-                         into application: ApplicationInfo) -> ApplicationInfo {
+    func mergingVerifiedCapability(_ inferredType: SupportedType,
+                                   into application: ApplicationInfo) -> ApplicationInfo {
         var types = application.supportedTypes
         if let index = types.firstIndex(where: {
             $0.contentTypeIdentifier == inferredType.contentTypeIdentifier
@@ -265,11 +272,38 @@ struct AppScanner: Sendable {
         } else {
             types.append(inferredType)
         }
+        var documentTypes = coalescedApplicationDocumentTypes(application.documentTypes)
+        let launchServicesDocument = ApplicationDocumentType(
+            id: "launch-services:\(inferredType.contentTypeIdentifier)",
+            name: inferredType.displayName,
+            extensions: inferredType.extensions,
+            mimeTypes: [],
+            declaredTypeIdentifiers: [],
+            role: "—",
+            handlerRank: nil,
+            source: .launchServices
+        )
+        if let index = documentTypes.firstIndex(where: { $0.id == launchServicesDocument.id }) {
+            let existing = documentTypes[index]
+            documentTypes[index] = ApplicationDocumentType(
+                id: existing.id,
+                name: existing.name,
+                extensions: normalize(existing.extensions + launchServicesDocument.extensions),
+                mimeTypes: existing.mimeTypes,
+                declaredTypeIdentifiers: existing.declaredTypeIdentifiers,
+                role: existing.role,
+                handlerRank: existing.handlerRank,
+                source: .launchServices
+            )
+        } else {
+            documentTypes.append(launchServicesDocument)
+        }
+        documentTypes = coalescedApplicationDocumentTypes(documentTypes)
         return ApplicationInfo(
             bundleIdentifier: application.bundleIdentifier,
             name: application.name,
             url: application.url,
-            documentTypes: application.documentTypes,
+            documentTypes: documentTypes,
             supportedTypes: types.sorted {
                 $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
             },

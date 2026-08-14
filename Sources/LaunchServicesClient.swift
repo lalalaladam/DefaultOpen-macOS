@@ -92,9 +92,15 @@ struct LaunchServicesClient: Sendable {
         }.uniqued(by: \.self)
     }
 
+    func application(_ bundleIdentifier: String, canOpenContentType identifier: String) -> Bool {
+        capableBundleIdentifiers(forContentType: identifier).contains(bundleIdentifier)
+    }
+
     func capableApplicationURLs(forContentType identifier: String) -> [URL] {
         guard let type = UTType(identifier) else { return [] }
-        return NSWorkspace.shared.urlsForApplications(toOpen: type)
+        return NSWorkspace.shared.urlsForApplications(toOpen: type).uniqued(by: { url in
+            Bundle(url: url)?.bundleIdentifier ?? url.standardizedFileURL.path
+        })
     }
 
     func defaultApplication(forURLScheme scheme: String) -> ApplicationInfo? {
@@ -113,6 +119,12 @@ struct LaunchServicesClient: Sendable {
         }
         .uniqued(by: \ApplicationInfo.bundleIdentifier)
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func application(_ bundleIdentifier: String, canOpenURLScheme scheme: String) -> Bool {
+        capableApplications(forURLScheme: scheme).contains {
+            $0.bundleIdentifier == bundleIdentifier
+        }
     }
 
     func setDefault(_ application: ApplicationInfo, forURLScheme scheme: String) throws {
@@ -164,5 +176,10 @@ private extension Sequence {
     func uniqued<Key: Hashable>(by keyPath: KeyPath<Element, Key>) -> [Element] {
         var seen = Set<Key>()
         return filter { seen.insert($0[keyPath: keyPath]).inserted }
+    }
+
+    func uniqued<Key: Hashable>(by key: (Element) -> Key) -> [Element] {
+        var seen = Set<Key>()
+        return filter { seen.insert(key($0)).inserted }
     }
 }

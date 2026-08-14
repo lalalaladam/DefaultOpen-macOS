@@ -56,6 +56,45 @@ struct ApplicationDocumentType: Identifiable, Hashable, Sendable {
     var isViewer: Bool { role.caseInsensitiveCompare("Viewer") == .orderedSame }
 }
 
+func coalescedApplicationDocumentTypes(
+    _ documents: [ApplicationDocumentType]
+) -> [ApplicationDocumentType] {
+    var order: [String] = []
+    var documentsByIdentifier: [String: ApplicationDocumentType] = [:]
+
+    for document in documents {
+        guard let existing = documentsByIdentifier[document.id] else {
+            order.append(document.id)
+            documentsByIdentifier[document.id] = document
+            continue
+        }
+        documentsByIdentifier[document.id] = ApplicationDocumentType(
+            id: existing.id,
+            name: existing.name,
+            extensions: uniqueValues(existing.extensions + document.extensions) {
+                $0.lowercased()
+            },
+            mimeTypes: uniqueValues(existing.mimeTypes + document.mimeTypes) {
+                $0.lowercased()
+            },
+            declaredTypeIdentifiers: uniqueValues(
+                existing.declaredTypeIdentifiers + document.declaredTypeIdentifiers,
+                key: { $0 }
+            ),
+            role: existing.role,
+            handlerRank: existing.handlerRank ?? document.handlerRank,
+            source: existing.source
+        )
+    }
+
+    return order.compactMap { documentsByIdentifier[$0] }
+}
+
+private func uniqueValues(_ values: [String], key: (String) -> String) -> [String] {
+    var seen = Set<String>()
+    return values.filter { seen.insert(key($0)).inserted }
+}
+
 struct SupportedType: Identifiable, Hashable, Sendable {
     let contentTypeIdentifier: String
     let extensions: [String]

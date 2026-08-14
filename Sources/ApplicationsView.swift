@@ -8,7 +8,13 @@ struct ApplicationsView: View {
 
     private var searchResults: [ApplicationSearchResult] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return store.applications.compactMap { ApplicationSearchResult(application: $0, query: query) }
+        return store.applications.compactMap {
+            ApplicationSearchResult(
+                application: $0,
+                verifiedFileTypes: store.verifiedFileTypes(for: $0),
+                query: query
+            )
+        }
             .sorted {
                 if $0.rank != $1.rank { return $0.rank < $1.rank }
                 return $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending
@@ -64,6 +70,9 @@ struct ApplicationsView: View {
             }
             Spacer()
             SearchBox(prompt: "搜索应用或扩展名", text: $searchText)
+            if store.isLoadingApplications(matchingExtensionSearch: searchText) {
+                ProgressView().controlSize(.small)
+            }
             Button { Task { await store.scanApplications() } } label: {
                 Label(LanguageSettings.shared.string(store.isScanning ? "正在扫描…" : "重新扫描"),
                       systemImage: "arrow.clockwise")
@@ -133,24 +142,13 @@ private struct ApplicationDetailView: View {
     @State private var pendingDefaultChange: PendingDefaultChange?
 
     private var rows: [ApplicationExtensionRow] {
-        var documentsByExtension: [String: [ApplicationDocumentType]] = [:]
-        for document in application.documentTypes {
-            for rawExtension in document.extensions {
-                let extensionName = rawExtension.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-                    .lowercased()
-                guard !extensionName.isEmpty, extensionName != "*" else { continue }
-                documentsByExtension[extensionName, default: []].append(document)
-            }
-        }
-
-        return documentsByExtension.compactMap { extensionName, _ in
-            guard let fileType = store.inferredFileType(forExtension: extensionName) else { return nil }
+        store.verifiedFileTypes(for: application).map { fileType in
             let current = store.defaultApplication(for: fileType)
             return ApplicationExtensionRow(
                 fileType: fileType,
                 currentDefault: current,
                 isApplicationDefault: current?.bundleIdentifier == application.bundleIdentifier,
-                isVolumePart: isVolumePartExtension(extensionName)
+                isVolumePart: isVolumePartExtension(fileType.extensionName)
             )
         }
         .sorted(by: rowSort)
@@ -187,7 +185,7 @@ private struct ApplicationDetailView: View {
                 ContentUnavailableView(
                     L10n.string("没有可设置的扩展名"),
                     systemImage: "doc.badge.ellipsis",
-                    description: Text(L10n.string("该 App 没有可映射为系统推测 UTType 的扩展名声明。"))
+                    description: Text(L10n.string("macOS 没有确认这个 App 能打开其声明的扩展名。"))
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -207,9 +205,6 @@ private struct ApplicationDetailView: View {
             selected.removeAll()
             showsVolumeParts = false
             pendingDefaultChange = nil
-        }
-        .task(id: application.id) {
-            store.refreshDefaults(for: rows.map(\.fileType))
         }
     }
 
@@ -428,7 +423,7 @@ private struct ApplicationSearchResult: Identifiable {
     let bestMatchingExtension: String?
     var id: String { application.id }
 
-    init?(application: ApplicationInfo, query: String) {
+    init?(application: ApplicationInfo, verifiedFileTypes: [FileTypeInfo], query: String) {
         self.application = application
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
@@ -443,14 +438,12 @@ private struct ApplicationSearchResult: Identifiable {
             .lowercased()
         var exactMatches = Set<String>()
         var prefixMatches = Set<String>()
-        for document in application.documentTypes {
-            for rawExtension in document.extensions {
-                let extensionName = rawExtension.lowercased()
-                if extensionName == extensionQuery {
-                    exactMatches.insert(extensionName)
-                } else if extensionName.hasPrefix(extensionQuery) {
-                    prefixMatches.insert(extensionName)
-                }
+        for fileType in verifiedFileTypes {
+            let extensionName = fileType.extensionName.lowercased()
+            if extensionName == extensionQuery {
+                exactMatches.insert(extensionName)
+            } else if extensionName.hasPrefix(extensionQuery) {
+                prefixMatches.insert(extensionName)
             }
         }
         let matchedExtensions = exactMatches.union(prefixMatches)
