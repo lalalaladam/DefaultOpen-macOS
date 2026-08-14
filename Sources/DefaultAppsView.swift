@@ -269,10 +269,11 @@ private struct DefaultAppCategoryEditorSheet: View {
     @State private var confirmingSaveWithDraft = false
     @State private var extensionSearchText = ""
     @State private var isSaving = false
+    @State private var showsInitialFocusTarget = true
     @FocusState private var focusedField: EditorField?
 
     private enum EditorField {
-        case title, subtitle, extensions
+        case initial, title, subtitle, extensions
     }
 
     private static let symbols = [
@@ -454,6 +455,22 @@ private struct DefaultAppCategoryEditorSheet: View {
         }
         .frame(width: 600, height: 520)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
+        .background(alignment: .topLeading) {
+            if editingID != nil && showsInitialFocusTarget {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .focusable()
+                    .focusEffectDisabled()
+                    .focused($focusedField, equals: .initial)
+                    .defaultFocus($focusedField, .initial)
+                    .accessibilityHidden(true)
+            }
+        }
+        .onChange(of: focusedField) { oldValue, newValue in
+            if oldValue == .initial && newValue != .initial {
+                showsInitialFocusTarget = false
+            }
+        }
         .alert(L10n.string("还有未添加的扩展名"), isPresented: $confirmingSaveWithDraft) {
             Button(L10n.string("返回添加"), role: .cancel) { focusedField = .extensions }
             Button(L10n.string("忽略并保存")) { Task { await save() } }
