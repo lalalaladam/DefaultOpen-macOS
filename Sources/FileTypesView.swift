@@ -502,7 +502,13 @@ struct ApplicationPickerSheet: View {
                                                      ? Color.accentColor : Color.secondary)
                                 AppIcon(url: app.url, size: 38)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(app.name).foregroundStyle(.primary)
+                                    HStack(spacing: 7) {
+                                        Text(app.name).foregroundStyle(.primary)
+                                        CapabilitySourceBadge(
+                                            evidence: capabilityEvidence(for: app),
+                                            requestedIdentifier: type.contentTypeIdentifier
+                                        )
+                                    }
                                     Text(app.bundleIdentifier).font(.caption).foregroundStyle(.secondary)
                                 }
                                 .alignmentGuide(.listRowSeparatorLeading) { dimensions in
@@ -536,8 +542,14 @@ struct ApplicationPickerSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 5) {
                     if let app = selectedApplication {
-                        Text(L10n.format("picker.setAppForExtension", app.name, type.dottedExtension))
-                            .font(.headline)
+                        HStack(spacing: 7) {
+                            Text(L10n.format("picker.setAppForExtension", app.name, type.dottedExtension))
+                                .font(.headline)
+                            CapabilitySourceBadge(
+                                evidence: capabilityEvidence(for: app),
+                                requestedIdentifier: type.contentTypeIdentifier
+                            )
+                        }
                         Text(L10n.format("picker.extensionExplanation", type.dottedExtension))
                             .font(.callout).foregroundStyle(.secondary)
                     } else {
@@ -585,11 +597,11 @@ struct ApplicationPickerSheet: View {
         .background(VisualEffectView(material: .hudWindow, blendingMode: .withinWindow))
         .onAppear {
             store.refreshDefaults(for: [type])
-            applications = store.capableApplications(for: type)
+            reloadApplications()
         }
         .onChange(of: store.defaultAppRevision) { _, _ in
             store.refreshDefaults(for: [type])
-            applications = store.capableApplications(for: type)
+            reloadApplications()
         }
         .alert(L10n.string("无法使用所选 App"), isPresented: Binding(
             get: { validationMessage != nil },
@@ -621,7 +633,7 @@ struct ApplicationPickerSheet: View {
             let application = try store.validatedApplication(at: url, for: type)
             applications.removeAll { $0.bundleIdentifier == application.bundleIdentifier }
             applications.append(application)
-            applications.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            applications.sort(by: applicationSort)
             selectedApplicationID = application.id
         } catch {
             validationMessage = error.localizedDescription
@@ -642,5 +654,24 @@ struct ApplicationPickerSheet: View {
                 isApplying = false
             }
         }
+    }
+
+    private func reloadApplications() {
+        applications = store.capableApplications(for: type).sorted(by: applicationSort)
+    }
+
+    private func capabilityEvidence(for application: ApplicationInfo) -> ApplicationCapabilityEvidence {
+        store.capabilityEvidence(for: application, fileType: type)
+    }
+
+    private func applicationSort(_ lhs: ApplicationInfo, _ rhs: ApplicationInfo) -> Bool {
+        let currentIdentifier = store.defaultApplication(for: type)?.bundleIdentifier
+        let lhsIsCurrent = lhs.bundleIdentifier == currentIdentifier
+        let rhsIsCurrent = rhs.bundleIdentifier == currentIdentifier
+        if lhsIsCurrent != rhsIsCurrent { return lhsIsCurrent }
+        let lhsSource = capabilityEvidence(for: lhs).source
+        let rhsSource = capabilityEvidence(for: rhs).source
+        if lhsSource != rhsSource { return lhsSource < rhsSource }
+        return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
     }
 }

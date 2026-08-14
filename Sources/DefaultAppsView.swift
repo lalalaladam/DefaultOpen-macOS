@@ -846,6 +846,7 @@ private struct DefaultAppPickerSheet: View {
                                     Text(candidate.application.name).foregroundStyle(.primary)
                                     Text(candidate.application.bundleIdentifier)
                                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    candidateCapabilitySummary(candidate)
                                 }
                                 .alignmentGuide(.listRowSeparatorLeading) { dimensions in
                                     dimensions[.leading]
@@ -912,7 +913,7 @@ private struct DefaultAppPickerSheet: View {
             Button(L10n.string("继续设置")) { applySelection() }
             Button(L10n.string("取消"), role: .cancel) {}
         } message: {
-            Text(L10n.string("这项修改可能同时影响其他文件格式。"))
+            Text(broadChangeConfirmationMessage)
         }
     }
 
@@ -940,7 +941,7 @@ private struct DefaultAppPickerSheet: View {
     }
 
     private var selectionSummaryHeight: CGFloat {
-        selectedCandidate == nil ? 56 : 104
+        selectedCandidate == nil ? 56 : 124
     }
 
     @ViewBuilder private var selectionSummary: some View {
@@ -952,6 +953,8 @@ private struct DefaultAppPickerSheet: View {
                                  candidate.settableSupportedCount,
                                  candidate.settableUnsupportedCount))
                     .font(.callout).foregroundStyle(.secondary)
+                Text(candidate.capabilitySourceCounts.summary)
+                    .font(.caption).foregroundStyle(.secondary)
                 Text(candidate.pendingDefaultChangeCount == 0
                      ? L10n.string("picker.noEstimatedConfirmations")
                      : L10n.format("picker.estimatedConfirmations",
@@ -1021,6 +1024,28 @@ private struct DefaultAppPickerSheet: View {
         category.optionalExtensions.map { "." + $0 }.joined(separator: L10n.string("list.separator"))
     }
 
+    @ViewBuilder private func candidateCapabilitySummary(_ candidate: DefaultAppCandidate) -> some View {
+        let evidence = candidate.supportedCapabilityEvidence
+        if evidence.count == 1, let item = evidence.first {
+            CapabilitySourceBadge(evidence: item,
+                                  requestedIdentifier: candidate.typeDetails.first(where: {
+                                      $0.isSupported && $0.canChangeDefault
+                                  })?.technicalIdentifier ?? "—")
+        } else {
+            Text(candidate.capabilitySourceCounts.summary)
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private var broadChangeConfirmationMessage: String {
+        var message = L10n.string("这项修改可能同时影响其他文件格式。")
+        if let selectedCandidate,
+           selectedCandidate.capabilitySourceCounts.hasNonExplicit {
+            message += "\n\n" + selectedCandidate.capabilitySourceCounts.summary
+        }
+        return message
+    }
+
     private func reloadCandidates() async {
         isLoadingCandidates = true
         async let loadedStatus = store.loadDefaultAppStatus(for: category)
@@ -1079,6 +1104,15 @@ private struct DefaultAppPickerSheet: View {
         candidates.sort {
             if $0.settableSupportedCount != $1.settableSupportedCount {
                 return $0.settableSupportedCount > $1.settableSupportedCount
+            }
+            if $0.capabilitySourceCounts.explicit != $1.capabilitySourceCounts.explicit {
+                return $0.capabilitySourceCounts.explicit > $1.capabilitySourceCounts.explicit
+            }
+            if $0.capabilitySourceCounts.broad != $1.capabilitySourceCounts.broad {
+                return $0.capabilitySourceCounts.broad > $1.capabilitySourceCounts.broad
+            }
+            if $0.capabilitySourceCounts.system != $1.capabilitySourceCounts.system {
+                return $0.capabilitySourceCounts.system < $1.capabilitySourceCounts.system
             }
             return $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending
         }

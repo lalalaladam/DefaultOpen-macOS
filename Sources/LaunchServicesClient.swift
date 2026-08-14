@@ -78,7 +78,8 @@ struct LaunchServicesClient: Sendable {
 
     func capableApplications(for type: FileTypeInfo) -> [ApplicationInfo] {
         capableApplicationURLs(forContentType: type.contentTypeIdentifier).compactMap { url in
-            Bundle(url: url)?.bundleIdentifier.map {
+            if let application = try? AppScanner().applicationInfo(at: url) { return application }
+            return Bundle(url: url)?.bundleIdentifier.map {
                 lightweightApplication(bundleID: $0, url: url)
             }
         }
@@ -114,8 +115,11 @@ struct LaunchServicesClient: Sendable {
         guard let unmanaged = LSCopyAllHandlersForURLScheme(scheme as CFString),
               let bundleIDs = unmanaged.takeRetainedValue() as? [String] else { return [] }
         return bundleIDs.compactMap { bundleID in
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-                .map { lightweightApplication(bundleID: bundleID, url: $0) }
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+                return nil
+            }
+            return (try? AppScanner().applicationInfo(at: url))
+                ?? lightweightApplication(bundleID: bundleID, url: url)
         }
         .uniqued(by: \ApplicationInfo.bundleIdentifier)
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

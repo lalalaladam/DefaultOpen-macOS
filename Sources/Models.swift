@@ -143,6 +143,136 @@ struct FileTypeInfo: Identifiable, Hashable, Sendable {
     var specificDisplayName: String { systemDisplayName }
 }
 
+enum ApplicationCapabilitySource: Int, Comparable, Sendable {
+    case explicit = 0
+    case broadDeclaration = 1
+    case systemRegistered = 2
+
+    static func < (lhs: ApplicationCapabilitySource,
+                   rhs: ApplicationCapabilitySource) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+
+    var label: String {
+        switch self {
+        case .explicit: L10n.string("明确")
+        case .broadDeclaration: L10n.string("宽泛")
+        case .systemRegistered: L10n.string("系统")
+        }
+    }
+}
+
+struct ApplicationCapabilityEvidence: Equatable, Sendable {
+    let source: ApplicationCapabilitySource
+    let declaredTypeIdentifier: String?
+
+    func explanation(for requestedIdentifier: String) -> String {
+        switch source {
+        case .explicit:
+            return L10n.format("capability.explicit", requestedIdentifier)
+        case .broadDeclaration:
+            return L10n.format("capability.broad", declaredTypeIdentifier ?? "—")
+        case .systemRegistered:
+            return L10n.string("capability.system")
+        }
+    }
+}
+
+struct ApplicationCapabilitySourceCounts: Equatable, Sendable {
+    var explicit = 0
+    var broad = 0
+    var system = 0
+
+    init<S: Sequence>(_ evidence: S) where S.Element == ApplicationCapabilityEvidence {
+        for item in evidence {
+            switch item.source {
+            case .explicit: explicit += 1
+            case .broadDeclaration: broad += 1
+            case .systemRegistered: system += 1
+            }
+        }
+    }
+
+    var total: Int { explicit + broad + system }
+    var hasNonExplicit: Bool { broad > 0 || system > 0 }
+    var summary: String {
+        L10n.format("capability.summary", explicit, broad, system)
+    }
+}
+
+enum ApplicationCapabilityEvidenceResolver {
+    static func evidence(for application: ApplicationInfo,
+                         fileType: FileTypeInfo) -> ApplicationCapabilityEvidence {
+        let bundleDocuments = application.documentTypes.filter {
+            $0.source == .bundleDeclaration
+        }
+        let extensionName = fileType.extensionName.lowercased()
+        let requestedIdentifier = fileType.contentTypeIdentifier
+
+        if bundleDocuments.contains(where: { document in
+            document.extensions.contains {
+                $0.caseInsensitiveCompare(extensionName) == .orderedSame
+            } || document.declaredTypeIdentifiers.contains(requestedIdentifier)
+        }) {
+            return ApplicationCapabilityEvidence(source: .explicit,
+                                                 declaredTypeIdentifier: requestedIdentifier)
+        }
+
+        guard let requestedType = UTType(requestedIdentifier) else {
+            return ApplicationCapabilityEvidence(source: .systemRegistered,
+                                                 declaredTypeIdentifier: nil)
+        }
+        let inherited = bundleDocuments.flatMap(\.declaredTypeIdentifiers).uniquedForEvidence()
+            .filter { identifier in
+                guard identifier != requestedIdentifier,
+                      let declaredType = UTType(identifier) else { return false }
+                return requestedType.conforms(to: declaredType)
+            }
+        if let closest = mostSpecificTypeIdentifier(in: inherited) {
+            return ApplicationCapabilityEvidence(source: .broadDeclaration,
+                                                 declaredTypeIdentifier: closest)
+        }
+        return ApplicationCapabilityEvidence(source: .systemRegistered,
+                                             declaredTypeIdentifier: nil)
+    }
+
+    static func evidence(for application: ApplicationInfo,
+                         urlScheme: String) -> ApplicationCapabilityEvidence {
+        let info = Bundle(url: application.url)?.infoDictionary ?? [:]
+        let urlTypes = info["CFBundleURLTypes"] as? [[String: Any]] ?? []
+        let declaredSchemes = urlTypes.flatMap { dictionary -> [String] in
+            if let values = dictionary["CFBundleURLSchemes"] as? [String] { return values }
+            if let value = dictionary["CFBundleURLSchemes"] as? String { return [value] }
+            return []
+        }
+        if declaredSchemes.contains(where: {
+            $0.caseInsensitiveCompare(urlScheme) == .orderedSame
+        }) {
+            return ApplicationCapabilityEvidence(source: .explicit,
+                                                 declaredTypeIdentifier: urlScheme.lowercased())
+        }
+        return ApplicationCapabilityEvidence(source: .systemRegistered,
+                                             declaredTypeIdentifier: nil)
+    }
+
+    private static func mostSpecificTypeIdentifier(in identifiers: [String]) -> String? {
+        identifiers.sorted().first { candidate in
+            guard let candidateType = UTType(candidate) else { return false }
+            return !identifiers.contains { other in
+                guard other != candidate, let otherType = UTType(other) else { return false }
+                return otherType.conforms(to: candidateType)
+            }
+        } ?? identifiers.sorted().first
+    }
+}
+
+private extension Sequence where Element == String {
+    func uniquedForEvidence() -> [String] {
+        var seen = Set<String>()
+        return filter { seen.insert($0).inserted }
+    }
+}
+
 enum SidebarSection: String, CaseIterable, Identifiable {
     case fileTypes = "文件类型"
     case applications = "应用程序"
@@ -226,6 +356,15 @@ struct DefaultAppCandidate: Identifiable, Sendable {
     let isCurrentDefault: Bool
     let typeDetails: [DefaultAppCandidateTypeDetail]
     var id: String { application.id }
+
+    var supportedCapabilityEvidence: [ApplicationCapabilityEvidence] {
+        typeDetails.filter { $0.isSupported && $0.canChangeDefault }
+            .map(\.capabilityEvidence)
+    }
+
+    var capabilitySourceCounts: ApplicationCapabilitySourceCounts {
+        ApplicationCapabilitySourceCounts(supportedCapabilityEvidence)
+    }
 }
 
 enum DefaultAppTypeScopePolicy: Equatable, Sendable {
@@ -246,6 +385,7 @@ struct DefaultAppCandidateTypeDetail: Identifiable, Sendable {
     let isAutomaticallyManaged: Bool
     let isManaged: Bool
     let canChangeDefault: Bool
+    let capabilityEvidence: ApplicationCapabilityEvidence
 }
 
 struct DefaultAppCategoryTypeDetail: Identifiable, Sendable {
@@ -306,6 +446,29 @@ struct AppIcon: View {
                 return
             }
             image = await ApplicationIconCache.shared.icon(for: url)
+        }
+    }
+}
+
+struct CapabilitySourceBadge: View {
+    let evidence: ApplicationCapabilityEvidence
+    let requestedIdentifier: String
+
+    var body: some View {
+        Text(evidence.source.label)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(foregroundColor.opacity(0.12), in: Capsule())
+            .help(evidence.explanation(for: requestedIdentifier))
+    }
+
+    private var foregroundColor: Color {
+        switch evidence.source {
+        case .explicit: .green
+        case .broadDeclaration: .orange
+        case .systemRegistered: .secondary
         }
     }
 }

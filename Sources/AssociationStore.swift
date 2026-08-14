@@ -341,6 +341,11 @@ final class AssociationStore: ObservableObject {
         return application
     }
 
+    func capabilityEvidence(for application: ApplicationInfo,
+                            fileType: FileTypeInfo) -> ApplicationCapabilityEvidence {
+        ApplicationCapabilityEvidenceResolver.evidence(for: application, fileType: fileType)
+    }
+
     func validatedDefaultAppCandidate(at url: URL, for category: DefaultAppCategory,
                                       includingOptional: Bool) throws -> DefaultAppCandidate {
         let application = try scanner.applicationInfo(at: url)
@@ -544,6 +549,15 @@ final class AssociationStore: ObservableObject {
                                        })
         }.sorted {
             if $0.supportedCount != $1.supportedCount { return $0.supportedCount > $1.supportedCount }
+            if $0.capabilitySourceCounts.explicit != $1.capabilitySourceCounts.explicit {
+                return $0.capabilitySourceCounts.explicit > $1.capabilitySourceCounts.explicit
+            }
+            if $0.capabilitySourceCounts.broad != $1.capabilitySourceCounts.broad {
+                return $0.capabilitySourceCounts.broad > $1.capabilitySourceCounts.broad
+            }
+            if $0.capabilitySourceCounts.system != $1.capabilitySourceCounts.system {
+                return $0.capabilitySourceCounts.system < $1.capabilitySourceCounts.system
+            }
             return $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending
         }
     }
@@ -999,8 +1013,19 @@ final class AssociationStore: ObservableObject {
             isManaged: !canCustomizeScope || isDefaultAppTypeManaged(identifier, for: category),
             canChangeDefault: (!canCustomizeScope
                 || isDefaultAppTypeManaged(identifier, for: category))
-                && (target.fileType.map { modificationRisk(for: $0) != .protected } ?? true)
+                && (target.fileType.map { modificationRisk(for: $0) != .protected } ?? true),
+            capabilityEvidence: capabilityEvidence(for: application, target: target)
         )
+    }
+
+    private func capabilityEvidence(for application: ApplicationInfo,
+                                    target: DefaultAppTarget) -> ApplicationCapabilityEvidence {
+        switch target.kind {
+        case .urlScheme(let scheme):
+            ApplicationCapabilityEvidenceResolver.evidence(for: application, urlScheme: scheme)
+        case .fileType(let type):
+            ApplicationCapabilityEvidenceResolver.evidence(for: application, fileType: type)
+        }
     }
 
     func setDefaultAppType(_ identifier: String, scopePolicy: DefaultAppTypeScopePolicy,
@@ -1294,6 +1319,15 @@ private struct DefaultAppResolver: Sendable {
             )
         }.sorted {
             if $0.supportedCount != $1.supportedCount { return $0.supportedCount > $1.supportedCount }
+            if $0.capabilitySourceCounts.explicit != $1.capabilitySourceCounts.explicit {
+                return $0.capabilitySourceCounts.explicit > $1.capabilitySourceCounts.explicit
+            }
+            if $0.capabilitySourceCounts.broad != $1.capabilitySourceCounts.broad {
+                return $0.capabilitySourceCounts.broad > $1.capabilitySourceCounts.broad
+            }
+            if $0.capabilitySourceCounts.system != $1.capabilitySourceCounts.system {
+                return $0.capabilitySourceCounts.system < $1.capabilitySourceCounts.system
+            }
             return $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending
         }
     }
@@ -1404,8 +1438,19 @@ private struct DefaultAppResolver: Sendable {
             canChangeDefault: (!canCustomize || isManaged(identifier, for: category))
                 && (target.fileType.map {
                     fileTypeModificationRisk(forIdentifier: $0.contentTypeIdentifier) != .protected
-                } ?? true)
+                } ?? true),
+            capabilityEvidence: capabilityEvidence(for: application, target: target)
         )
+    }
+
+    private func capabilityEvidence(for application: ApplicationInfo,
+                                    target: DefaultAppTarget) -> ApplicationCapabilityEvidence {
+        switch target.kind {
+        case .urlScheme(let scheme):
+            ApplicationCapabilityEvidenceResolver.evidence(for: application, urlScheme: scheme)
+        case .fileType(let type):
+            ApplicationCapabilityEvidenceResolver.evidence(for: application, fileType: type)
+        }
     }
 
     private func supports(_ application: ApplicationInfo, target: DefaultAppTarget) -> Bool {

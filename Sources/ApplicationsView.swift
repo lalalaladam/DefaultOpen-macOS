@@ -119,7 +119,7 @@ struct ApplicationsView: View {
         if let result = searchResults.first(where: { $0.application.id == selectedAppID }) {
             ApplicationDetailView(application: result.application,
                                   matchingExtensions: result.matchingExtensions,
-                                  bestMatchingExtension: result.bestMatchingExtension)
+                                  exactMatchingExtension: result.exactMatchingExtension)
                 .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ContentUnavailableView(
@@ -147,9 +147,9 @@ private struct ApplicationDetailView: View {
     @EnvironmentObject private var store: AssociationStore
     let application: ApplicationInfo
     let matchingExtensions: Set<String>
-    let bestMatchingExtension: String?
+    let exactMatchingExtension: String?
     @State private var selected = Set<String>()
-    @State private var sortColumn: ExtensionSortColumn = .extensionName
+    @State private var sortColumn: ExtensionSortColumn = .source
     @State private var sortAscending = true
     @State private var showsVolumeParts = false
     @State private var pendingDefaultChange: PendingDefaultChange?
@@ -161,7 +161,8 @@ private struct ApplicationDetailView: View {
                 fileType: fileType,
                 currentDefault: current,
                 isApplicationDefault: current?.bundleIdentifier == application.bundleIdentifier,
-                isVolumePart: isVolumePartExtension(fileType.extensionName)
+                isVolumePart: isVolumePartExtension(fileType.extensionName),
+                capabilityEvidence: store.capabilityEvidence(for: application, fileType: fileType)
             )
         }
         .sorted(by: rowSort)
@@ -245,27 +246,30 @@ private struct ApplicationDetailView: View {
 
     private var extensionTable: some View {
         GeometryReader { proxy in
-            let extensionWidth = min(130, max(90, proxy.size.width * 0.16))
-            let defaultAppWidth = min(195, max(145, proxy.size.width * 0.24))
-            let actionWidth: CGFloat = 78
-            let typeWidth = max(160, proxy.size.width - extensionWidth - defaultAppWidth
-                                - actionWidth - 72)
+            let extensionWidth = min(120, max(82, proxy.size.width * 0.14))
+            let sourceWidth: CGFloat = 64
+            let defaultAppWidth = min(185, max(128, proxy.size.width * 0.22))
+            let actionWidth: CGFloat = 68
+            let typeWidth = max(140, proxy.size.width - extensionWidth - defaultAppWidth
+                                - sourceWidth - actionWidth - 76)
 
             VStack(spacing: 0) {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     sortableHeader("扩展名", column: .extensionName, width: extensionWidth)
                     sortableHeader("文件类型 / UTType", column: .typeName, width: typeWidth)
+                    sortableHeader("来源", column: .source, width: sourceWidth)
                     sortableHeader("当前默认 App", column: .defaultAppName, width: defaultAppWidth)
                     Color.clear.frame(width: actionWidth)
                 }
                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                .padding(.horizontal, 12).frame(height: 30)
+                .padding(.leading, 12).padding(.trailing, 24).frame(height: 30)
                 Divider()
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(visibleRows) { row in
                             extensionRow(row, extensionWidth: extensionWidth, typeWidth: typeWidth,
+                                         sourceWidth: sourceWidth,
                                          defaultAppWidth: defaultAppWidth,
                                          actionWidth: actionWidth)
                             Divider().padding(.leading, 12)
@@ -289,8 +293,9 @@ private struct ApplicationDetailView: View {
 
     private func extensionRow(_ row: ApplicationExtensionRow, extensionWidth: CGFloat,
                               typeWidth: CGFloat,
+                              sourceWidth: CGFloat,
                               defaultAppWidth: CGFloat, actionWidth: CGFloat) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             HStack(spacing: 5) {
                 Text(row.fileType.dottedExtension).font(.system(.callout, design: .monospaced))
                 if matchingExtensions.contains(row.id) {
@@ -307,9 +312,15 @@ private struct ApplicationDetailView: View {
             .frame(width: typeWidth, alignment: .leading)
             .help("\(row.fileType.displayName)\n\(row.fileType.contentTypeIdentifier)")
 
+            CapabilitySourceBadge(evidence: row.capabilityEvidence,
+                                  requestedIdentifier: row.fileType.contentTypeIdentifier)
+                .frame(width: sourceWidth, alignment: .leading)
+
             HStack(spacing: 7) {
                 AppIcon(url: row.currentDefault?.url, size: 25)
                 Text(row.currentDefault?.name ?? L10n.string("未设置")).lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(row.currentDefault?.name ?? L10n.string("未设置"))
                 if row.isApplicationDefault {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
                 }
@@ -321,7 +332,7 @@ private struct ApplicationDetailView: View {
                 .disabled(row.isApplicationDefault || store.modificationRisk(for: row.fileType) == .protected)
                 .frame(width: actionWidth)
         }
-        .padding(.horizontal, 12).frame(height: 52)
+        .padding(.leading, 12).padding(.trailing, 24).frame(height: 52)
         .background(selected.contains(row.id) ? Color.accentColor.opacity(0.18) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture { selectRow(row.id) }
@@ -352,8 +363,8 @@ private struct ApplicationDetailView: View {
     }
 
     private func rowSort(_ lhs: ApplicationExtensionRow, _ rhs: ApplicationExtensionRow) -> Bool {
-        let lhsIsBestMatch = lhs.id == bestMatchingExtension
-        let rhsIsBestMatch = rhs.id == bestMatchingExtension
+        let lhsIsBestMatch = lhs.id == exactMatchingExtension
+        let rhsIsBestMatch = rhs.id == exactMatchingExtension
         if lhsIsBestMatch != rhsIsBestMatch { return lhsIsBestMatch }
 
         let lhsMatch = matchingExtensions.contains(lhs.id)
@@ -362,6 +373,12 @@ private struct ApplicationDetailView: View {
 
         let comparison: ComparisonResult
         switch sortColumn {
+        case .source:
+            if lhs.capabilityEvidence.source != rhs.capabilityEvidence.source {
+                let ordered = lhs.capabilityEvidence.source < rhs.capabilityEvidence.source
+                return sortAscending ? ordered : !ordered
+            }
+            comparison = lhs.fileType.extensionName.localizedStandardCompare(rhs.fileType.extensionName)
         case .extensionName:
             comparison = lhs.fileType.extensionName.localizedStandardCompare(rhs.fileType.extensionName)
         case .typeName:
@@ -410,6 +427,13 @@ private struct ApplicationDetailView: View {
         let extensions = change.types.map(\.dottedExtension)
             .joined(separator: L10n.string("list.separator"))
         var message = L10n.format("application.confirmExtensions", application.name, extensions)
+        let evidence = change.types.map {
+            store.capabilityEvidence(for: application, fileType: $0)
+        }
+        let sourceCounts = ApplicationCapabilitySourceCounts(evidence)
+        if sourceCounts.hasNonExplicit {
+            message += "\n\n" + sourceCounts.summary
+        }
         let broad = change.types.filter { store.modificationRisk(for: $0) == .broad }
         if !broad.isEmpty {
             message += "\n\n" + L10n.format(
@@ -433,7 +457,7 @@ private struct ApplicationSearchResult: Identifiable {
     let subtitle: String
     let rank: Int
     let matchingExtensions: Set<String>
-    let bestMatchingExtension: String?
+    let exactMatchingExtension: String?
     var id: String { application.id }
 
     init?(application: ApplicationInfo, verifiedFileTypes: [FileTypeInfo], query: String) {
@@ -443,7 +467,7 @@ private struct ApplicationSearchResult: Identifiable {
             subtitle = application.bundleIdentifier
             rank = 10
             matchingExtensions = []
-            bestMatchingExtension = nil
+            exactMatchingExtension = nil
             return
         }
 
@@ -466,7 +490,7 @@ private struct ApplicationSearchResult: Identifiable {
             || application.searchAliases.contains { $0.localizedCaseInsensitiveContains(normalized) }
         guard nameMatches || !matchedExtensions.isEmpty else { return nil }
         matchingExtensions = matchedExtensions
-        bestMatchingExtension = exactMatches.sorted().first ?? prefixMatches.sorted().first
+        exactMatchingExtension = exactMatches.sorted().first
         if let exact = exactMatches.sorted().first {
             subtitle = L10n.format("支持打开 %@", "." + exact)
             rank = 0
@@ -480,13 +504,14 @@ private struct ApplicationSearchResult: Identifiable {
     }
 }
 
-private enum ExtensionSortColumn { case extensionName, typeName, defaultAppName }
+private enum ExtensionSortColumn { case source, extensionName, typeName, defaultAppName }
 
 private struct ApplicationExtensionRow: Identifiable {
     let fileType: FileTypeInfo
     let currentDefault: ApplicationInfo?
     let isApplicationDefault: Bool
     let isVolumePart: Bool
+    let capabilityEvidence: ApplicationCapabilityEvidence
     var id: String { fileType.extensionName.lowercased() }
 }
 
