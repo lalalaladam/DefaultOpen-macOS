@@ -524,18 +524,20 @@ struct ApplicationPickerSheet: View {
                                                      ? Color.accentColor : Color.secondary)
                                 AppIcon(url: app.url, size: 38)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 7) {
-                                        Text(app.name).foregroundStyle(.primary)
-                                        CapabilitySourceBadge(
-                                            evidence: capabilityEvidence(for: app),
-                                            requestedIdentifier: type.contentTypeIdentifier
-                                        )
-                                    }
+                                    Text(app.name).foregroundStyle(.primary)
+                                        .lineLimit(1).truncationMode(.tail)
+                                        .help(app.name)
                                     Text(app.bundleIdentifier).font(.caption).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
                                 }
+                                .frame(width: 260, alignment: .leading)
                                 .alignmentGuide(.listRowSeparatorLeading) { dimensions in
                                     dimensions[.leading]
                                 }
+                                CapabilitySourceBadge(
+                                    evidence: capabilityEvidence(for: app),
+                                    requestedIdentifier: type.contentTypeIdentifier
+                                )
                                 Spacer()
                                 if store.defaultApplication(for: type)?.bundleIdentifier == app.bundleIdentifier {
                                     Label(L10n.string("当前默认"), systemImage: "checkmark.circle.fill")

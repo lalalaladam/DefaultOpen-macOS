@@ -734,6 +734,11 @@ final class AssociationStore: ObservableObject {
             if $0.capabilitySourceCounts.explicit != $1.capabilitySourceCounts.explicit {
                 return $0.capabilitySourceCounts.explicit > $1.capabilitySourceCounts.explicit
             }
+            if $0.capabilitySourceCounts.extensionDeclaration
+                != $1.capabilitySourceCounts.extensionDeclaration {
+                return $0.capabilitySourceCounts.extensionDeclaration
+                    > $1.capabilitySourceCounts.extensionDeclaration
+            }
             if $0.capabilitySourceCounts.broad != $1.capabilitySourceCounts.broad {
                 return $0.capabilitySourceCounts.broad > $1.capabilitySourceCounts.broad
             }
@@ -1521,6 +1526,11 @@ private struct DefaultAppResolver: Sendable {
             if $0.supportedCount != $1.supportedCount { return $0.supportedCount > $1.supportedCount }
             if $0.capabilitySourceCounts.explicit != $1.capabilitySourceCounts.explicit {
                 return $0.capabilitySourceCounts.explicit > $1.capabilitySourceCounts.explicit
+            }
+            if $0.capabilitySourceCounts.extensionDeclaration
+                != $1.capabilitySourceCounts.extensionDeclaration {
+                return $0.capabilitySourceCounts.extensionDeclaration
+                    > $1.capabilitySourceCounts.extensionDeclaration
             }
             if $0.capabilitySourceCounts.broad != $1.capabilitySourceCounts.broad {
                 return $0.capabilitySourceCounts.broad > $1.capabilitySourceCounts.broad

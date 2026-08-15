@@ -1137,6 +1137,11 @@ private struct DefaultAppPickerSheet: View {
             if $0.capabilitySourceCounts.explicit != $1.capabilitySourceCounts.explicit {
                 return $0.capabilitySourceCounts.explicit > $1.capabilitySourceCounts.explicit
             }
+            if $0.capabilitySourceCounts.extensionDeclaration
+                != $1.capabilitySourceCounts.extensionDeclaration {
+                return $0.capabilitySourceCounts.extensionDeclaration
+                    > $1.capabilitySourceCounts.extensionDeclaration
+            }
             if $0.capabilitySourceCounts.broad != $1.capabilitySourceCounts.broad {
                 return $0.capabilitySourceCounts.broad > $1.capabilitySourceCounts.broad
             }
