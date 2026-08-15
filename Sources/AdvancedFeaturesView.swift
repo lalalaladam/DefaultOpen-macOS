@@ -22,16 +22,16 @@ struct AdvancedFeaturesView: View {
             }
         }
         .sheet(item: $typeBeingChanged) { type in
-            ApplicationPickerSheet(type: type).environmentObject(store)
+            ApplicationPickerSheet(type: type, scope: .contentType).environmentObject(store)
         }
     }
 
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text(L10n.string("修复未生效的默认打开方式"))
+                Text(L10n.string("管理扩展名的系统类型"))
                     .font(.title2.weight(.semibold))
-                Text(L10n.string("当部分同扩展名文件仍使用原来的 App 时，可在这里检查并修改其系统类型。"))
+                Text(L10n.string("查看同一扩展名注册的多个 UTType，并分别设置默认 App。"))
                     .font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
@@ -63,7 +63,7 @@ struct AdvancedFeaturesView: View {
             ContentUnavailableView(
                 L10n.string("输入扩展名开始检查"),
                 systemImage: "wrench.and.screwdriver",
-                description: Text(L10n.string("普通设置未完全生效时，这里会列出 macOS 可能使用的其他类型。"))
+                description: Text(L10n.string("输入扩展名并按回车，查看其系统类型和默认 App。"))
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -80,7 +80,7 @@ struct AdvancedFeaturesView: View {
                                 .font(.headline)
                             Text(L10n.string(matches.count == 1
                                              ? "macOS 只为这个扩展名返回了一个可修改的系统类型。"
-                                             : "普通设置会修改首选类型；如果个别文件仍未变化，可修改下面的其他类型。"))
+                                             : "首选类型通常决定文件的双击打开方式。"))
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                         .padding(.bottom, 4)

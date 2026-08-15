@@ -489,10 +489,16 @@ private struct DefaultAppLabel: View {
     }
 }
 
+enum ApplicationPickerScope {
+    case filenameExtension
+    case contentType
+}
+
 struct ApplicationPickerSheet: View {
     @EnvironmentObject private var store: AssociationStore
     @Environment(\.dismiss) private var dismiss
     let type: FileTypeInfo
+    var scope: ApplicationPickerScope = .filenameExtension
     @State private var applications: [ApplicationInfo] = []
     @State private var selectedApplicationID: ApplicationInfo.ID?
     @State private var isApplying = false
@@ -592,15 +598,24 @@ struct ApplicationPickerSheet: View {
                 VStack(alignment: .leading, spacing: 5) {
                     if let app = selectedApplication {
                         HStack(spacing: 7) {
-                            Text(L10n.format("picker.setAppForExtension", app.name, type.dottedExtension))
+                            Text(scope == .contentType
+                                 ? L10n.format("picker.setAppForContentType", app.name)
+                                 : L10n.format("picker.setAppForExtension", app.name, type.dottedExtension))
                                 .font(.headline)
                             CapabilitySourceBadge(
                                 evidence: capabilityEvidence(for: app),
                                 requestedIdentifier: type.contentTypeIdentifier
                             )
                         }
-                        Text(L10n.format("picker.extensionExplanation", type.dottedExtension))
+                        Text(scope == .contentType
+                             ? L10n.format("picker.typeExplanation", type.contentTypeIdentifier)
+                             : L10n.format("picker.extensionExplanation", type.dottedExtension))
                             .font(.callout).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(scope == .contentType
+                                  ? L10n.format("picker.typeExplanation", type.contentTypeIdentifier)
+                                  : L10n.format("picker.extensionExplanation", type.dottedExtension))
                     } else {
                         Text(L10n.string("请先选择一个 App。点击应用不会立即修改系统设置。"))
                             .font(.callout).foregroundStyle(.secondary)
