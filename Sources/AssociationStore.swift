@@ -1473,6 +1473,9 @@ private struct DefaultAppResolver: Sendable {
                       category: category)
     }
 
+    // Swift 6.4 in Xcode 27 beta crashes in LoopInvariantCodeMotion while
+    // optimizing this function. Keep the workaround local to this resolver.
+    @_optimize(none)
     func candidates(for category: DefaultAppCategory,
                     includingOptional: Bool) -> [DefaultAppCandidate] {
         let allTargets = targets(for: category, includingOptional: includingOptional,
