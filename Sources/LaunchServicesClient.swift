@@ -210,3 +210,99 @@ private extension Sequence {
         return filter { seen.insert(key($0)).inserted }
     }
 }
+
+struct FreshAssociationProbeRecord: Codable, Sendable {
+    let extensionName: String
+    let contentTypeIdentifier: String
+    let displayName: String
+    let defaultBundleIdentifier: String?
+    let defaultApplicationName: String?
+    let defaultApplicationPath: String?
+
+    var fileType: FileTypeInfo {
+        FileTypeInfo(extensionName: extensionName,
+                     contentTypeIdentifier: contentTypeIdentifier,
+                     displayName: displayName)
+    }
+
+    var defaultApplication: ApplicationInfo? {
+        guard let bundleIdentifier = defaultBundleIdentifier,
+              let name = defaultApplicationName,
+              let path = defaultApplicationPath else { return nil }
+        let url = URL(fileURLWithPath: path)
+        guard isUsableApplicationURL(url) else { return nil }
+        return ApplicationInfo(bundleIdentifier: bundleIdentifier, name: name,
+                               url: url, supportedTypes: [])
+    }
+}
+
+enum FreshAssociationProbe {
+    static let argument = "--defaultopen-association-probe"
+
+    /// Runs before NSApplicationMain in a short-lived child process.
+    static func runIfRequested(arguments: [String] = CommandLine.arguments) -> Bool {
+        guard let marker = arguments.firstIndex(of: argument) else { return false }
+        let extensions = arguments.dropFirst(marker + 1).map {
+            $0.trimmingCharacters(in: CharacterSet(charactersIn: " .")).lowercased()
+        }.filter { !$0.isEmpty }.uniqued(by: \.self)
+        let client = LaunchServicesClient()
+        let records = extensions.compactMap { extensionName -> FreshAssociationProbeRecord? in
+            guard let type = try? client.fileType(for: extensionName) else { return nil }
+            let application = client.defaultApplication(for: type)
+            return FreshAssociationProbeRecord(
+                extensionName: extensionName,
+                contentTypeIdentifier: type.contentTypeIdentifier,
+                displayName: type.specificDisplayName,
+                defaultBundleIdentifier: application?.bundleIdentifier,
+                defaultApplicationName: application?.name,
+                defaultApplicationPath: application?.url.path
+            )
+        }
+        guard let data = try? JSONEncoder().encode(records) else { return true }
+        FileHandle.standardOutput.write(data)
+        return true
+    }
+
+    /// Launching the current executable directly creates a fresh UTType/Launch Services process
+    /// without opening another app window or registering another installed component.
+    static func query(_ extensions: [String], timeout: TimeInterval = 6) -> [FreshAssociationProbeRecord]? {
+        guard let executableURL = Bundle.main.executableURL else { return nil }
+        let normalized = extensions.map {
+            $0.trimmingCharacters(in: CharacterSet(charactersIn: " .")).lowercased()
+        }.filter { !$0.isEmpty }.uniqued(by: \.self)
+        guard !normalized.isEmpty else { return [] }
+
+        let process = Process()
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DefaultOpen-Probe-\(UUID().uuidString).json")
+        guard FileManager.default.createFile(atPath: outputURL.path, contents: nil),
+              let output = try? FileHandle(forWritingTo: outputURL) else { return nil }
+        defer {
+            try? output.close()
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+        process.executableURL = executableURL
+        process.arguments = [argument] + normalized
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+        try? output.close()
+        guard let data = try? Data(contentsOf: outputURL) else { return nil }
+        return try? JSONDecoder().decode([FreshAssociationProbeRecord].self, from: data)
+    }
+}

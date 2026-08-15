@@ -10,6 +10,9 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: NSWindowController?
     private var aboutWindowController: AboutWindowController?
     private var activationRefreshTask: Task<Void, Never>?
+    private var applicationDirectoryRefreshTask: Task<Void, Never>?
+    private var removalStabilizationTask: Task<Void, Never>?
+    private var requiresApplicationRescan = false
     private let applicationDirectoryMonitor = ApplicationDirectoryMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -24,9 +27,28 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
         showMainWindow()
         applicationDirectoryMonitor.start { [weak self] in
             DispatchQueue.main.async {
-                self?.scheduleExternalRefresh(after: .milliseconds(500))
+                self?.scheduleApplicationDirectoryRefresh()
             }
         }
+        let workspaceNotifications = NSWorkspace.shared.notificationCenter
+        workspaceNotifications.addObserver(
+            self,
+            selector: #selector(applicationEnvironmentDidChange(_:)),
+            name: NSWorkspace.didMountNotification,
+            object: nil
+        )
+        workspaceNotifications.addObserver(
+            self,
+            selector: #selector(applicationEnvironmentDidChange(_:)),
+            name: NSWorkspace.didUnmountNotification,
+            object: nil
+        )
+        workspaceNotifications.addObserver(
+            self,
+            selector: #selector(applicationEnvironmentDidChange(_:)),
+            name: NSWorkspace.didLaunchApplicationNotification,
+            object: nil
+        )
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -40,12 +62,54 @@ final class DefaultOpenAppDelegate: NSObject, NSApplicationDelegate {
         scheduleExternalRefresh(after: .milliseconds(350))
     }
 
-    private func scheduleExternalRefresh(after delay: Duration) {
+    private func scheduleExternalRefresh(after delay: Duration, rescanApplications: Bool = false) {
+        requiresApplicationRescan = requiresApplicationRescan || rescanApplications
         activationRefreshTask?.cancel()
         activationRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
-            await store.refreshAfterActivation()
+            let shouldRescanApplications = requiresApplicationRescan
+            requiresApplicationRescan = false
+            if shouldRescanApplications {
+                await store.scanApplications()
+            } else {
+                await store.refreshAfterActivation()
+            }
+        }
+    }
+
+    private func scheduleApplicationDirectoryRefresh() {
+        applicationDirectoryRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let removedApplication = await store.refreshAfterApplicationDirectoryChange()
+            guard !Task.isCancelled, removedApplication else { return }
+            scheduleRemovalStabilization()
+        }
+    }
+
+    private func scheduleRemovalStabilization() {
+        removalStabilizationTask?.cancel()
+        removalStabilizationTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(1_500))
+            guard !Task.isCancelled, let self else { return }
+            await store.scanApplications()
+
+            try? await Task.sleep(for: .milliseconds(2_500))
+            guard !Task.isCancelled else { return }
+            await store.scanApplications()
+        }
+    }
+
+    @objc private func applicationEnvironmentDidChange(_ notification: Notification) {
+        if notification.name == NSWorkspace.didLaunchApplicationNotification,
+           let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                as? NSRunningApplication,
+           application.bundleIdentifier == Bundle.main.bundleIdentifier {
+            return
+        }
+        scheduleExternalRefresh(after: .milliseconds(750), rescanApplications: true)
+        if notification.name == NSWorkspace.didUnmountNotification {
+            scheduleRemovalStabilization()
         }
     }
 

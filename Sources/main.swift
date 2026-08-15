@@ -1,9 +1,14 @@
 import AppKit
+import Darwin
 
-MainActor.assumeIsolated {
-    let application = NSApplication.shared
-    let delegate = DefaultOpenAppDelegate()
-    application.delegate = delegate
+if FreshAssociationProbe.runIfRequested() {
+    exit(EXIT_SUCCESS)
+} else {
+    MainActor.assumeIsolated {
+        let application = NSApplication.shared
+        let delegate = DefaultOpenAppDelegate()
+        application.delegate = delegate
 
-    _ = NSApplicationMain(CommandLine.argc, CommandLine.unsafeArgv)
+        _ = NSApplicationMain(CommandLine.argc, CommandLine.unsafeArgv)
+    }
 }

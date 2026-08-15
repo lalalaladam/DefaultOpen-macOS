@@ -62,6 +62,7 @@ final class AssociationStore: ObservableObject {
     private var queriedDefaultContentTypes = Set<String>()
     private var registeredFileTypesByExtension: [String: [FileTypeInfo]] = [:]
     private var applicationBundleSnapshot: Set<String>?
+    private var applicationScanRequested = false
     private var ignoredDefaultAppTypesByCategory: [String: Set<String>]
     private var includedDefaultAppTypesByCategory: [String: Set<String>]
 
@@ -140,32 +141,128 @@ final class AssociationStore: ObservableObject {
     }
 
     func scanApplications() async {
+        applicationScanRequested = true
         guard !isScanning else { return }
         isScanning = true
         defer { isScanning = false }
+
+        while applicationScanRequested {
+            applicationScanRequested = false
+            await performApplicationScan()
+        }
+    }
+
+    /// Directory notifications arrive before Launch Services necessarily finishes unregistering
+    /// a removed application. Preserve whether this was a removal so the app delegate can request
+    /// a small number of delayed, full environment refreshes.
+    func refreshAfterApplicationDirectoryChange() async -> Bool {
+        let previousSnapshot = applicationBundleSnapshot
+        let knownApplicationWasRemoved = applications.contains {
+            !FileManager.default.fileExists(atPath: $0.url.path)
+        }
+        let scanner = self.scanner
+        let currentSnapshot = await Task.detached(priority: .utility) {
+            scanner.applicationBundleSnapshot()
+        }.value
+        guard !Task.isCancelled else { return false }
+
+        let removedApplication = knownApplicationWasRemoved || (previousSnapshot.map {
+            !$0.subtracting(currentSnapshot).isEmpty
+        } ?? false)
+        await scanApplications()
+        return removedApplication
+    }
+
+    private func performApplicationScan() async {
         queriedApplicationExtensions.removeAll()
         loadingApplicationExtensions.removeAll()
+        queriedDefaultContentTypes.removeAll()
+        registeredFileTypesByExtension.removeAll()
         let scanner = self.scanner
-        let managedTypes = fileTypes
-        let seedExtensions = (
-            managedTypes.map(\.extensionName)
-            + DefaultAppCategory.all.flatMap { $0.extensions(includingOptional: true) }
+        let launchServices = self.launchServices
+        let managedExtensions = fileTypes.map(\.extensionName).uniqued()
+        let categoryExtensions = (
+            DefaultAppCategory.all.flatMap { $0.extensions(includingOptional: true) }
             + customDefaultAppCategories.flatMap { $0.extensions(includingOptional: true) }
         ).uniqued()
+        let seedExtensions = (
+            managedExtensions + categoryExtensions
+        ).uniqued()
         let result = await Task.detached(priority: .userInitiated) {
-            let scannedApplications = scanner.scanInstalledApplications(managedTypes: managedTypes)
+            let preliminaryManagedTypes = managedExtensions.compactMap {
+                try? launchServices.fileType(for: $0)
+            }
+            let scannedApplications = scanner.scanInstalledApplications(
+                managedTypes: preliminaryManagedTypes
+            )
+            let discoveredExtensions = scannedApplications.flatMap { application in
+                application.documentTypes.flatMap(\.extensions)
+                    + application.supportedTypes.flatMap(\.extensions)
+            }
+            let probeRecords = FreshAssociationProbe.query(
+                (seedExtensions + discoveredExtensions).uniqued()
+            )
+            let freshTypesByExtension = Dictionary(uniqueKeysWithValues: (probeRecords ?? []).map {
+                ($0.extensionName, $0.fileType)
+            })
+            let managedTypes = managedExtensions.compactMap {
+                freshTypesByExtension[$0] ?? (try? launchServices.fileType(for: $0))
+            }.sorted {
+                $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending
+            }
             let capabilities = ApplicationCapabilityIndexer().build(
                 applications: scannedApplications,
-                seedExtensions: seedExtensions
+                seedExtensions: seedExtensions,
+                resolvedFileTypesByExtension: freshTypesByExtension
             )
-            return (capabilities, scanner.applicationBundleSnapshot())
+            let catalogTypes = Dictionary(
+                grouping: managedTypes + capabilities.index.allFileTypes,
+                by: \FileTypeInfo.id
+            ).compactMap(\.value.first).sorted {
+                $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending
+            }
+            let categoryTypes = categoryExtensions.flatMap {
+                (try? launchServices.fileTypes(for: $0)) ?? []
+            }
+            let applicationTypes = capabilities.applications
+                .flatMap(\.supportedTypes).flatMap(\.fileTypes)
+            let defaultTypes = Dictionary(
+                grouping: catalogTypes + categoryTypes + applicationTypes,
+                by: \FileTypeInfo.contentTypeIdentifier
+            ).compactMap(\.value.first)
+            var defaults: [String: ApplicationInfo] = [:]
+            if let probeRecords {
+                for record in probeRecords {
+                    if let application = record.defaultApplication {
+                        defaults[record.contentTypeIdentifier] = application
+                    }
+                }
+            } else {
+                for type in defaultTypes {
+                    if let application = launchServices.defaultApplication(for: type) {
+                        defaults[type.contentTypeIdentifier] = application
+                    }
+                }
+            }
+            return (managedTypes, catalogTypes, capabilities, defaults,
+                    scanner.applicationBundleSnapshot())
         }.value
-        applicationCapabilityIndex = result.0.index
-        applications = result.0.applications
-        applicationBundleSnapshot = result.1
-        registeredFileTypesByExtension.removeAll()
-        mergeIntoFileTypeCatalog(result.0.index.allFileTypes)
-        await refreshExternalDefaultChanges()
+        guard !Task.isCancelled, !applicationScanRequested else { return }
+
+        // Publish one internally consistent environment. Replacing the defaults dictionary is
+        // important when an uninstalled app's UTType identifier disappears or changes.
+        fileTypes = result.0
+        allFileTypes = result.1
+        applicationCapabilityIndex = result.2.index
+        applications = result.2.applications
+        defaultsByContentType = result.3
+        applicationBundleSnapshot = result.4
+        optimisticDefaultAppStatuses.removeAll()
+        defaultAppCandidatesCache.removeAll()
+        loadingDefaultAppCandidates.values.forEach { $0.task.cancel() }
+        loadingDefaultAppCandidates.removeAll()
+        builtInDefaultAppStatuses.removeAll()
+        advanceDefaultAppRevision()
     }
 
     func refreshAfterActivation() async {
@@ -177,7 +274,6 @@ final class AssociationStore: ObservableObject {
 
         if let previousSnapshot = applicationBundleSnapshot,
            previousSnapshot != currentSnapshot {
-            guard !isScanning else { return }
             await scanApplications()
         } else {
             applicationBundleSnapshot = currentSnapshot
@@ -804,13 +900,13 @@ final class AssociationStore: ObservableObject {
             })
         }.value
         optimisticDefaultAppStatuses.removeAll()
-        for (identifier, application) in refreshed {
-            if let application {
-                defaultsByContentType[identifier] = application
-            } else {
-                defaultsByContentType.removeValue(forKey: identifier)
-            }
-        }
+        defaultsByContentType = Dictionary(uniqueKeysWithValues: refreshed.compactMap {
+            identifier, application in application.map { (identifier, $0) }
+        })
+        defaultAppCandidatesCache.removeAll()
+        loadingDefaultAppCandidates.values.forEach { $0.task.cancel() }
+        loadingDefaultAppCandidates.removeAll()
+        builtInDefaultAppStatuses.removeAll()
         advanceDefaultAppRevision()
     }
 

@@ -46,7 +46,9 @@ struct ApplicationCapabilityIndexer: Sendable {
     private let launchServices = LaunchServicesClient()
 
     func build(applications initialApplications: [ApplicationInfo],
-               seedExtensions: [String]) -> ApplicationCapabilityBuildResult {
+               seedExtensions: [String],
+               resolvedFileTypesByExtension: [String: FileTypeInfo] = [:])
+    -> ApplicationCapabilityBuildResult {
         var applicationsByIdentifier: [String: ApplicationInfo] = [:]
         for application in initialApplications {
             applicationsByIdentifier[application.bundleIdentifier] = application
@@ -67,7 +69,8 @@ struct ApplicationCapabilityIndexer: Sendable {
 
             var fileTypesByIdentifier = [String: [FileTypeInfo]]()
             for extensionName in batch {
-                guard let fileType = try? launchServices.fileType(for: extensionName),
+                guard let fileType = resolvedFileTypesByExtension[extensionName]
+                        ?? (try? launchServices.fileType(for: extensionName)),
                       UTType(fileType.contentTypeIdentifier)?.isDynamic == false else { continue }
                 fileTypesByIdentifier[fileType.contentTypeIdentifier, default: []].append(fileType)
             }
