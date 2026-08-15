@@ -123,13 +123,11 @@ struct FileTypesView: View {
 
     private var fileTypeList: some View {
         GeometryReader { proxy in
-            let extensionWidth = min(144, max(124, proxy.size.width * 0.16))
-            let defaultAppWidth = min(250, max(180, proxy.size.width * 0.28))
             let actionWidth: CGFloat = 142
-            // Keep a stable gutter for the vertical scroller so its first appearance
-            // cannot force the trailing columns to move.
-            let typeWidth = min(300, max(180, proxy.size.width - extensionWidth
-                                        - defaultAppWidth - actionWidth - 88))
+            let informationWidth = max(522, proxy.size.width - actionWidth - 84)
+            let extensionWidth = max(124, informationWidth * 0.20)
+            let typeWidth = max(180, informationWidth * 0.45)
+            let defaultAppWidth = max(180, informationWidth - extensionWidth - typeWidth)
 
             VStack(spacing: 0) {
                 HStack(spacing: 12) {

@@ -272,14 +272,12 @@ private struct ApplicationDetailView: View {
 
     private var extensionTable: some View {
         GeometryReader { proxy in
-            let extensionWidth = min(145, max(112, proxy.size.width * 0.18))
             let sourceWidth: CGFloat = proxy.size.width < 650 ? 56 : 64
-            let defaultAppWidth = min(230, max(150, proxy.size.width * 0.27))
-            let actionWidth: CGFloat = 68
-            let remainingTypeWidth = proxy.size.width - extensionWidth - defaultAppWidth
-                - sourceWidth - actionWidth - 86
-            let typeWidth = min(280, max(0, remainingTypeWidth))
-            let trailingGapWidth = max(0, remainingTypeWidth - typeWidth)
+            let actionWidth: CGFloat = 80
+            let informationWidth = max(352, proxy.size.width - sourceWidth - actionWidth - 76)
+            let extensionWidth = max(112, informationWidth * 0.20)
+            let typeWidth = max(90, informationWidth * 0.45)
+            let defaultAppWidth = max(150, informationWidth - extensionWidth - typeWidth)
 
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
@@ -287,7 +285,6 @@ private struct ApplicationDetailView: View {
                     sortableHeader("文件类型 / UTType", column: .typeName, width: typeWidth)
                     sortableHeader("来源", column: .source, width: sourceWidth)
                     sortableHeader("当前默认 App", column: .defaultAppName, width: defaultAppWidth)
-                    Color.clear.frame(width: trailingGapWidth)
                     Color.clear.frame(width: actionWidth)
                 }
                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -300,8 +297,7 @@ private struct ApplicationDetailView: View {
                             extensionRow(row, extensionWidth: extensionWidth, typeWidth: typeWidth,
                                          sourceWidth: sourceWidth,
                                          defaultAppWidth: defaultAppWidth,
-                                         actionWidth: actionWidth,
-                                         trailingGapWidth: trailingGapWidth)
+                                         actionWidth: actionWidth)
                             Divider().padding(.leading, 12)
                         }
                         if hiddenVolumePartCount > 0 {
@@ -324,8 +320,7 @@ private struct ApplicationDetailView: View {
     private func extensionRow(_ row: ApplicationExtensionRow, extensionWidth: CGFloat,
                               typeWidth: CGFloat,
                               sourceWidth: CGFloat,
-                              defaultAppWidth: CGFloat, actionWidth: CGFloat,
-                              trailingGapWidth: CGFloat) -> some View {
+                              defaultAppWidth: CGFloat, actionWidth: CGFloat) -> some View {
         HStack(spacing: 10) {
             HStack(spacing: 5) {
                 Text(row.fileType.dottedExtension)
@@ -361,8 +356,6 @@ private struct ApplicationDetailView: View {
                 }
             }
             .frame(width: defaultAppWidth, alignment: .leading)
-
-            Color.clear.frame(width: trailingGapWidth)
 
             Button(L10n.string("设为默认")) { makeDefault(row) }
                 .buttonStyle(.borderless)

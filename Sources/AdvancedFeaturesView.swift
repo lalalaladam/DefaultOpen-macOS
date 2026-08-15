@@ -67,29 +67,36 @@ struct AdvancedFeaturesView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.format("advanced.fallbackTypes", "." + (checkedExtension ?? ""),
-                                         matches.count))
-                            .font(.headline)
-                        Text(L10n.string(matches.count == 1
-                                         ? "macOS 只为这个扩展名返回了一个可修改的系统类型。"
-                                         : "普通设置会修改首选类型；如果个别文件仍未变化，可修改下面的其他类型。"))
-                            .font(.callout).foregroundStyle(.secondary)
-                    }
-                    .padding(.bottom, 4)
+            GeometryReader { proxy in
+                let rowContentWidth = max(460, proxy.size.width - 258)
+                let typeWidth = rowContentWidth * 0.64
+                let defaultAppWidth = rowContentWidth - typeWidth
 
-                    ForEach(matches) { match in
-                        matchRow(match)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L10n.format("advanced.fallbackTypes", "." + (checkedExtension ?? ""),
+                                             matches.count))
+                                .font(.headline)
+                            Text(L10n.string(matches.count == 1
+                                             ? "macOS 只为这个扩展名返回了一个可修改的系统类型。"
+                                             : "普通设置会修改首选类型；如果个别文件仍未变化，可修改下面的其他类型。"))
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        .padding(.bottom, 4)
+
+                        ForEach(matches) { match in
+                            matchRow(match, typeWidth: typeWidth, defaultAppWidth: defaultAppWidth)
+                        }
                     }
+                    .padding(18)
                 }
-                .padding(18)
             }
         }
     }
 
-    private func matchRow(_ match: FallbackTypeMatch) -> some View {
+    private func matchRow(_ match: FallbackTypeMatch, typeWidth: CGFloat,
+                          defaultAppWidth: CGFloat) -> some View {
         HStack(spacing: 14) {
             Image(systemName: match.isPreferred ? "checkmark.circle.fill" : "doc.circle")
                 .font(.title3)
@@ -110,15 +117,14 @@ struct AdvancedFeaturesView: View {
                     .font(.caption.monospaced()).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             }
-
-            Spacer(minLength: 12)
+            .frame(width: typeWidth, alignment: .leading)
 
             HStack(spacing: 7) {
                 AppIcon(url: match.defaultApplication?.url, size: 26)
                 Text(match.defaultApplication?.name ?? L10n.string("未设置"))
                     .lineLimit(1)
             }
-            .frame(width: 170, alignment: .leading)
+            .frame(width: defaultAppWidth, alignment: .leading)
 
             HStack {
                 Button(L10n.string(match.isPreferred || matches.count == 1
