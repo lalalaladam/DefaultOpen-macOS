@@ -126,7 +126,7 @@ struct FileTypesView: View {
             let actionWidth: CGFloat = 142
             let informationWidth = max(522, proxy.size.width - actionWidth - 84)
             let extensionWidth = max(124, informationWidth * 0.20)
-            let typeWidth = max(180, informationWidth * 0.45)
+            let typeWidth = max(180, informationWidth * 0.40)
             let defaultAppWidth = max(180, informationWidth - extensionWidth - typeWidth)
 
             VStack(spacing: 0) {
@@ -181,7 +181,9 @@ struct FileTypesView: View {
                                 .frame(width: typeWidth, alignment: .leading)
                                 .contentShape(Rectangle())
                                 .help(fileTypeHelp(for: row.type, risk: modificationRisk))
-                                DefaultAppLabel(application: row.defaultApplication)
+                                DefaultAppLabel(application: row.defaultApplication,
+                                                fileType: row.type,
+                                                showsCapabilitySource: true)
                                     .frame(width: defaultAppWidth, alignment: .leading)
                                 HStack(spacing: 6) {
                                     if row.isUnregistered, row.defaultApplication != nil {
@@ -450,14 +452,31 @@ private struct FileTypeRow: Identifiable {
 }
 
 private struct DefaultAppLabel: View {
+    @EnvironmentObject private var store: AssociationStore
     let application: ApplicationInfo?
+    var fileType: FileTypeInfo?
+    var showsCapabilitySource = false
+
     var body: some View {
         HStack(spacing: 8) {
             AppIcon(url: application?.url, size: 28)
+                .frame(width: 28)
             Text(application?.name ?? L10n.string("未设置"))
                 .foregroundStyle(application == nil ? .secondary : .primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if showsCapabilitySource {
+                Group {
+                    if let application, let fileType {
+                        CapabilitySourceBadge(
+                            evidence: store.capabilityEvidence(for: application, fileType: fileType),
+                            requestedIdentifier: fileType.contentTypeIdentifier
+                        )
+                    }
+                }
+                .frame(width: 52, alignment: .leading)
+            }
         }
         .contentShape(Rectangle())
         .help(application?.name ?? L10n.string("未设置"))

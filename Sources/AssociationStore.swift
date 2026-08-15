@@ -470,7 +470,19 @@ final class AssociationStore: ObservableObject {
 
     func capabilityEvidence(for application: ApplicationInfo,
                             fileType: FileTypeInfo) -> ApplicationCapabilityEvidence {
-        ApplicationCapabilityEvidenceResolver.evidence(for: application, fileType: fileType)
+        let resolvedApplication: ApplicationInfo
+        if application.documentTypes.contains(where: { $0.source == .bundleDeclaration }) {
+            resolvedApplication = application
+        } else {
+            resolvedApplication = applications.first {
+                $0.bundleIdentifier == application.bundleIdentifier
+                    && $0.documentTypes.contains(where: { $0.source == .bundleDeclaration })
+            } ?? application
+        }
+        return ApplicationCapabilityEvidenceResolver.evidence(
+            for: resolvedApplication,
+            fileType: fileType
+        )
     }
 
     func validatedDefaultAppCandidate(at url: URL, for category: DefaultAppCategory,

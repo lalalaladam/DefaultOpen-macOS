@@ -69,7 +69,7 @@ struct AdvancedFeaturesView: View {
         } else {
             GeometryReader { proxy in
                 let rowContentWidth = max(460, proxy.size.width - 258)
-                let typeWidth = rowContentWidth * 0.64
+                let typeWidth = rowContentWidth * 0.58
                 let defaultAppWidth = rowContentWidth - typeWidth
 
                 ScrollView {
@@ -121,8 +121,22 @@ struct AdvancedFeaturesView: View {
 
             HStack(spacing: 7) {
                 AppIcon(url: match.defaultApplication?.url, size: 26)
+                    .frame(width: 26)
                 Text(match.defaultApplication?.name ?? L10n.string("未设置"))
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(match.defaultApplication?.name ?? L10n.string("未设置"))
+                Group {
+                    if let application = match.defaultApplication {
+                        CapabilitySourceBadge(
+                            evidence: store.capabilityEvidence(for: application,
+                                                               fileType: match.fileType),
+                            requestedIdentifier: match.fileType.contentTypeIdentifier
+                        )
+                    }
+                }
+                .frame(width: 52, alignment: .leading)
             }
             .frame(width: defaultAppWidth, alignment: .leading)
 

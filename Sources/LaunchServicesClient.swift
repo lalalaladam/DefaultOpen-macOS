@@ -80,7 +80,8 @@ struct LaunchServicesClient: Sendable {
               let bundleID = unmanaged.takeRetainedValue() as String?,
               let url = resolvedApplicationURL(bundleIdentifier: bundleID, contentType: type),
               isUsableApplicationURL(url) else { return nil }
-        return lightweightApplication(bundleID: bundleID, url: url)
+        return (try? AppScanner().applicationInfo(at: url))
+            ?? lightweightApplication(bundleID: bundleID, url: url)
     }
 
     func capableApplications(for type: FileTypeInfo) -> [ApplicationInfo] {
