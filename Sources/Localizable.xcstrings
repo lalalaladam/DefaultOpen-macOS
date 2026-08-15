@@ -473,13 +473,15 @@
     "正在载入当前状态…" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading current status…"}}}},
     "正在载入可用的应用…" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Loading available apps…"}}}},
     "明确" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Explicit"}}}},
+    "扩展" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Extension"}}}},
     "宽泛" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Broad"}}}},
     "系统" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"System"}}}},
     "来源" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Source"}}}},
     "capability.explicit" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"该 App 明确声明了 UTType %@。"}},"en":{"stringUnit":{"state":"translated","value":"This app explicitly declares UTType %@."}}}},
+    "capability.extension" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"仅声明扩展名 %@，未声明此 UTType。"}},"en":{"stringUnit":{"state":"translated","value":"Declares only the %@ extension, not this UTType."}}}},
     "capability.broad" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"该类型经由 App 声明的上位 UTType %@ 匹配。"}},"en":{"stringUnit":{"state":"translated","value":"This type matches through the app's declared parent UTType %@."}}}},
     "capability.system" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"Launch Services 将该 App 登记为候选；Bundle 中未找到对应声明。"}},"en":{"stringUnit":{"state":"translated","value":"Launch Services registers this app as a candidate; no corresponding Bundle declaration was found."}}}},
-    "capability.summary" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"明确 %ld · 宽泛 %ld · 系统 %ld"}},"en":{"stringUnit":{"state":"translated","value":"Explicit %ld · Broad %ld · System %ld"}}}}
+    "capability.summary" : {"localizations":{"zh-Hans":{"stringUnit":{"state":"translated","value":"明确 %ld · 扩展 %ld · 宽泛 %ld · 系统 %ld"}},"en":{"stringUnit":{"state":"translated","value":"Explicit %ld · Extension %ld · Broad %ld · System %ld"}}}}
   },
   "version" : "1.0"
 }

@@ -149,6 +149,7 @@ struct FileTypesView: View {
                                 Text(row.type.dottedExtension)
                                     .font(.system(.body, design: .monospaced).weight(.semibold))
                                     .lineLimit(1).frame(width: extensionWidth, alignment: .leading)
+                                    .contentShape(Rectangle())
                                     .help(row.type.dottedExtension)
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
@@ -172,16 +173,14 @@ struct FileTypesView: View {
                                             Image(systemName: modificationRisk == .protected
                                                   ? "lock.fill" : "exclamationmark.triangle.fill")
                                                 .font(.caption).foregroundStyle(.orange)
-                                                .help(L10n.string(modificationRisk == .protected
-                                                    ? "这是基础 UTType，仅供查看，不能修改默认 App。"
-                                                    : "这是较宽泛的 UTType，修改可能影响其他扩展名。"))
                                         }
                                     }
                                     Text(row.type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
                                         .lineLimit(1).truncationMode(.middle)
                                 }
                                 .frame(width: typeWidth, alignment: .leading)
-                                .help("\(row.type.displayName)\n\(row.type.contentTypeIdentifier)")
+                                .contentShape(Rectangle())
+                                .help(fileTypeHelp(for: row.type, risk: modificationRisk))
                                 DefaultAppLabel(application: row.defaultApplication)
                                     .frame(width: defaultAppWidth, alignment: .leading)
                                 HStack(spacing: 6) {
@@ -321,6 +320,20 @@ struct FileTypesView: View {
         .buttonStyle(.plain)
     }
 
+    private func fileTypeHelp(for type: FileTypeInfo,
+                              risk: FileTypeModificationRisk) -> String {
+        var lines = [type.displayName, type.contentTypeIdentifier]
+        switch risk {
+        case .normal:
+            break
+        case .broad:
+            lines.append(L10n.string("这是较宽泛的 UTType，修改可能影响其他扩展名。"))
+        case .protected:
+            lines.append(L10n.string("这是基础 UTType，仅供查看，不能修改默认 App。"))
+        }
+        return lines.joined(separator: "\n")
+    }
+
 }
 
 private enum FileTypeSortColumn {
@@ -383,6 +396,8 @@ private struct CustomExtensionsSheet: View {
                             Text(type.displayName)
                             Text(type.contentTypeIdentifier).font(.caption).foregroundStyle(.secondary)
                         }
+                        .contentShape(Rectangle())
+                        .help("\(type.displayName)\n\(type.contentTypeIdentifier)")
                         Spacer()
                         DefaultAppLabel(application: store.defaultApplication(for: type))
                             .frame(width: 180, alignment: .leading)
@@ -441,7 +456,11 @@ private struct DefaultAppLabel: View {
             AppIcon(url: application?.url, size: 28)
             Text(application?.name ?? L10n.string("未设置"))
                 .foregroundStyle(application == nil ? .secondary : .primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
+        .contentShape(Rectangle())
+        .help(application?.name ?? L10n.string("未设置"))
     }
 }
 

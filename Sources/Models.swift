@@ -145,8 +145,9 @@ struct FileTypeInfo: Identifiable, Hashable, Sendable {
 
 enum ApplicationCapabilitySource: Int, Comparable, Sendable {
     case explicit = 0
-    case broadDeclaration = 1
-    case systemRegistered = 2
+    case extensionDeclaration = 1
+    case broadDeclaration = 2
+    case systemRegistered = 3
 
     static func < (lhs: ApplicationCapabilitySource,
                    rhs: ApplicationCapabilitySource) -> Bool {
@@ -156,6 +157,7 @@ enum ApplicationCapabilitySource: Int, Comparable, Sendable {
     var label: String {
         switch self {
         case .explicit: L10n.string("明确")
+        case .extensionDeclaration: L10n.string("扩展")
         case .broadDeclaration: L10n.string("宽泛")
         case .systemRegistered: L10n.string("系统")
         }
@@ -165,11 +167,22 @@ enum ApplicationCapabilitySource: Int, Comparable, Sendable {
 struct ApplicationCapabilityEvidence: Equatable, Sendable {
     let source: ApplicationCapabilitySource
     let declaredTypeIdentifier: String?
+    let declaredExtension: String?
+
+    init(source: ApplicationCapabilitySource,
+         declaredTypeIdentifier: String? = nil,
+         declaredExtension: String? = nil) {
+        self.source = source
+        self.declaredTypeIdentifier = declaredTypeIdentifier
+        self.declaredExtension = declaredExtension
+    }
 
     func explanation(for requestedIdentifier: String) -> String {
         switch source {
         case .explicit:
             return L10n.format("capability.explicit", requestedIdentifier)
+        case .extensionDeclaration:
+            return L10n.format("capability.extension", declaredExtension ?? "—")
         case .broadDeclaration:
             return L10n.format("capability.broad", declaredTypeIdentifier ?? "—")
         case .systemRegistered:
@@ -180,6 +193,7 @@ struct ApplicationCapabilityEvidence: Equatable, Sendable {
 
 struct ApplicationCapabilitySourceCounts: Equatable, Sendable {
     var explicit = 0
+    var extensionDeclaration = 0
     var broad = 0
     var system = 0
 
@@ -187,16 +201,17 @@ struct ApplicationCapabilitySourceCounts: Equatable, Sendable {
         for item in evidence {
             switch item.source {
             case .explicit: explicit += 1
+            case .extensionDeclaration: extensionDeclaration += 1
             case .broadDeclaration: broad += 1
             case .systemRegistered: system += 1
             }
         }
     }
 
-    var total: Int { explicit + broad + system }
-    var hasNonExplicit: Bool { broad > 0 || system > 0 }
+    var total: Int { explicit + extensionDeclaration + broad + system }
+    var hasNonExplicit: Bool { extensionDeclaration > 0 || broad > 0 || system > 0 }
     var summary: String {
-        L10n.format("capability.summary", explicit, broad, system)
+        L10n.format("capability.summary", explicit, extensionDeclaration, broad, system)
     }
 }
 
@@ -209,13 +224,20 @@ enum ApplicationCapabilityEvidenceResolver {
         let extensionName = fileType.extensionName.lowercased()
         let requestedIdentifier = fileType.contentTypeIdentifier
 
-        if bundleDocuments.contains(where: { document in
-            document.extensions.contains {
-                $0.caseInsensitiveCompare(extensionName) == .orderedSame
-            } || document.declaredTypeIdentifiers.contains(requestedIdentifier)
+        if bundleDocuments.contains(where: {
+            $0.declaredTypeIdentifiers.contains(requestedIdentifier)
         }) {
             return ApplicationCapabilityEvidence(source: .explicit,
                                                  declaredTypeIdentifier: requestedIdentifier)
+        }
+
+        if bundleDocuments.contains(where: { document in
+            document.extensions.contains {
+                $0.caseInsensitiveCompare(extensionName) == .orderedSame
+            }
+        }) {
+            return ApplicationCapabilityEvidence(source: .extensionDeclaration,
+                                                 declaredExtension: "." + extensionName)
         }
 
         guard let requestedType = UTType(requestedIdentifier) else {
@@ -467,6 +489,7 @@ struct CapabilitySourceBadge: View {
     private var foregroundColor: Color {
         switch evidence.source {
         case .explicit: .green
+        case .extensionDeclaration: .blue
         case .broadDeclaration: .orange
         case .systemRegistered: .secondary
         }
