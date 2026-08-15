@@ -118,6 +118,7 @@ struct FileTypesView: View {
             }
             guard !Task.isCancelled else { return }
             await store.loadDefaultApplication(matchingExtensionSearch: effectiveSearchText)
+            await store.loadDefaultApplicationCapabilityMetadata()
         }
     }
 
@@ -466,20 +467,25 @@ private struct DefaultAppLabel: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .help(application?.name ?? L10n.string("未设置"))
             if showsCapabilitySource {
                 Group {
                     if let application, let fileType {
-                        CapabilitySourceBadge(
-                            evidence: store.capabilityEvidence(for: application, fileType: fileType),
-                            requestedIdentifier: fileType.contentTypeIdentifier
-                        )
+                        if let evidence = store.capabilityEvidenceIfAvailable(
+                            for: application,
+                            fileType: fileType
+                        ) {
+                            CapabilitySourceBadge(
+                                evidence: evidence,
+                                requestedIdentifier: fileType.contentTypeIdentifier
+                            )
+                        }
                     }
                 }
                 .frame(width: 52, alignment: .leading)
             }
         }
         .contentShape(Rectangle())
-        .help(application?.name ?? L10n.string("未设置"))
     }
 }
 

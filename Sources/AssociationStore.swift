@@ -46,6 +46,7 @@ final class AssociationStore: ObservableObject {
     @Published private(set) var customDefaultAppCategories: [DefaultAppCategory] = []
     @Published private(set) var applicationCapabilityIndex = ApplicationCapabilityIndex()
     @Published private(set) var loadingApplicationExtensions = Set<String>()
+    @Published private(set) var capabilityApplicationsByIdentifier: [String: ApplicationInfo] = [:]
 
     private let launchServices = LaunchServicesClient()
     private let scanner = AppScanner()
@@ -61,8 +62,10 @@ final class AssociationStore: ObservableObject {
     private var queriedApplicationExtensions = Set<String>()
     private var queriedDefaultContentTypes = Set<String>()
     private var registeredFileTypesByExtension: [String: [FileTypeInfo]] = [:]
+    private var fullyLoadedDeclaredFileTypes: [FileTypeInfo] = []
     private var applicationBundleSnapshot: Set<String>?
     private var applicationScanRequested = false
+    private var loadingCapabilityApplicationIdentifiers = Set<String>()
     private var ignoredDefaultAppTypesByCategory: [String: Set<String>]
     private var includedDefaultAppTypesByCategory: [String: Set<String>]
 
@@ -180,6 +183,7 @@ final class AssociationStore: ObservableObject {
         registeredFileTypesByExtension.removeAll()
         let scanner = self.scanner
         let launchServices = self.launchServices
+        let shouldIncludeAllDeclaredTypes = hasLoadedAllFileTypes
         let managedExtensions = fileTypes.map(\.extensionName).uniqued()
         let categoryExtensions = (
             DefaultAppCategory.all.flatMap { $0.extensions(includingOptional: true) }
@@ -215,8 +219,10 @@ final class AssociationStore: ObservableObject {
                 seedExtensions: seedExtensions,
                 resolvedFileTypesByExtension: freshTypesByExtension
             )
+            let declaredTypes = shouldIncludeAllDeclaredTypes
+                ? scanner.declaredFileTypes(from: capabilities.applications) : []
             let catalogTypes = Dictionary(
-                grouping: managedTypes + capabilities.index.allFileTypes,
+                grouping: managedTypes + capabilities.index.allFileTypes + declaredTypes,
                 by: \FileTypeInfo.id
             ).compactMap(\.value.first).sorted {
                 $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending
@@ -244,7 +250,7 @@ final class AssociationStore: ObservableObject {
                     }
                 }
             }
-            return (managedTypes, catalogTypes, capabilities, defaults,
+            return (managedTypes, catalogTypes, capabilities, defaults, declaredTypes,
                     scanner.applicationBundleSnapshot())
         }.value
         guard !Task.isCancelled, !applicationScanRequested else { return }
@@ -252,11 +258,24 @@ final class AssociationStore: ObservableObject {
         // Publish one internally consistent environment. Replacing the defaults dictionary is
         // important when an uninstalled app's UTType identifier disappears or changes.
         fileTypes = result.0
-        allFileTypes = result.1
+        if shouldIncludeAllDeclaredTypes {
+            fullyLoadedDeclaredFileTypes = result.4
+        }
+        allFileTypes = Dictionary(
+            grouping: result.1 + (hasLoadedAllFileTypes ? fullyLoadedDeclaredFileTypes : []),
+            by: \FileTypeInfo.id
+        ).compactMap(\.value.first).sorted {
+            $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending
+        }
         applicationCapabilityIndex = result.2.index
         applications = result.2.applications
+        capabilityApplicationsByIdentifier.merge(
+            Dictionary(uniqueKeysWithValues: result.2.applications.map {
+                ($0.bundleIdentifier, $0)
+            })
+        ) { _, scanned in scanned }
         defaultsByContentType = result.3
-        applicationBundleSnapshot = result.4
+        applicationBundleSnapshot = result.5
         optimisticDefaultAppStatuses.removeAll()
         defaultAppCandidatesCache.removeAll()
         loadingDefaultAppCandidates.values.forEach { $0.task.cancel() }
@@ -365,8 +384,11 @@ final class AssociationStore: ObservableObject {
             return (discoveredTypes, defaults)
         }.value
         mergeIntoFileTypeCatalog(result.0)
+        fullyLoadedDeclaredFileTypes = result.0
         defaultsByContentType.merge(result.1) { _, new in new }
         hasLoadedAllFileTypes = true
+        isLoadingFileTypes = false
+        await loadDefaultApplicationCapabilityMetadata(for: Array(result.1.values))
     }
 
     func addExtension(_ value: String) -> Bool {
@@ -470,19 +492,62 @@ final class AssociationStore: ObservableObject {
 
     func capabilityEvidence(for application: ApplicationInfo,
                             fileType: FileTypeInfo) -> ApplicationCapabilityEvidence {
-        let resolvedApplication: ApplicationInfo
-        if application.documentTypes.contains(where: { $0.source == .bundleDeclaration }) {
-            resolvedApplication = application
-        } else {
-            resolvedApplication = applications.first {
-                $0.bundleIdentifier == application.bundleIdentifier
-                    && $0.documentTypes.contains(where: { $0.source == .bundleDeclaration })
-            } ?? application
+        let resolvedApplication = resolvedCapabilityApplication(for: application) ?? application
+        return ApplicationCapabilityEvidenceResolver.evidence(
+            for: resolvedApplication,
+            fileType: fileType
+        )
+    }
+
+    func capabilityEvidenceIfAvailable(for application: ApplicationInfo,
+                                       fileType: FileTypeInfo) -> ApplicationCapabilityEvidence? {
+        guard let resolvedApplication = resolvedCapabilityApplication(for: application) else {
+            return nil
         }
         return ApplicationCapabilityEvidenceResolver.evidence(
             for: resolvedApplication,
             fileType: fileType
         )
+    }
+
+    func loadDefaultApplicationCapabilityMetadata(
+        for requestedApplications: [ApplicationInfo]? = nil
+    ) async {
+        let source = requestedApplications ?? Array(defaultsByContentType.values)
+        var candidatesByIdentifier: [String: ApplicationInfo] = [:]
+        for application in source {
+            if application.documentTypes.contains(where: { $0.source == .bundleDeclaration }) {
+                capabilityApplicationsByIdentifier[application.bundleIdentifier] = application
+            } else {
+                candidatesByIdentifier[application.bundleIdentifier] = application
+            }
+        }
+        let pending = candidatesByIdentifier.values.filter {
+            capabilityApplicationsByIdentifier[$0.bundleIdentifier] == nil
+                && !loadingCapabilityApplicationIdentifiers.contains($0.bundleIdentifier)
+        }
+        guard !pending.isEmpty else { return }
+
+        loadingCapabilityApplicationIdentifiers.formUnion(pending.map(\.bundleIdentifier))
+        let scanner = self.scanner
+        let loaded = await Task.detached(priority: .utility) {
+            pending.compactMap { try? scanner.applicationInfo(at: $0.url) }
+        }.value
+        loadingCapabilityApplicationIdentifiers.subtract(pending.map(\.bundleIdentifier))
+        guard !Task.isCancelled else { return }
+        capabilityApplicationsByIdentifier.merge(
+            Dictionary(uniqueKeysWithValues: loaded.map { ($0.bundleIdentifier, $0) })
+        ) { _, scanned in scanned }
+    }
+
+    private func resolvedCapabilityApplication(for application: ApplicationInfo) -> ApplicationInfo? {
+        if application.documentTypes.contains(where: { $0.source == .bundleDeclaration }) {
+            return application
+        }
+        if let cached = capabilityApplicationsByIdentifier[application.bundleIdentifier] {
+            return cached
+        }
+        return applications.first { $0.bundleIdentifier == application.bundleIdentifier }
     }
 
     func validatedDefaultAppCandidate(at url: URL, for category: DefaultAppCategory,
@@ -920,6 +985,7 @@ final class AssociationStore: ObservableObject {
         defaultsByContentType = Dictionary(uniqueKeysWithValues: refreshed.compactMap {
             identifier, application in application.map { (identifier, $0) }
         })
+        await loadDefaultApplicationCapabilityMetadata()
         defaultAppCandidatesCache.removeAll()
         loadingDefaultAppCandidates.values.forEach { $0.task.cancel() }
         loadingDefaultAppCandidates.removeAll()

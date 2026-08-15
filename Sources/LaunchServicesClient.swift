@@ -76,12 +76,11 @@ struct LaunchServicesClient: Sendable {
     }
 
     func defaultApplication(for type: FileTypeInfo) -> ApplicationInfo? {
-        guard let unmanaged = LSCopyDefaultRoleHandlerForContentType(type.contentTypeIdentifier as CFString, .all),
-              let bundleID = unmanaged.takeRetainedValue() as String?,
-              let url = resolvedApplicationURL(bundleIdentifier: bundleID, contentType: type),
+        guard let contentType = UTType(type.contentTypeIdentifier),
+              let url = NSWorkspace.shared.urlForApplication(toOpen: contentType),
+              let bundleID = Bundle(url: url)?.bundleIdentifier,
               isUsableApplicationURL(url) else { return nil }
-        return (try? AppScanner().applicationInfo(at: url))
-            ?? lightweightApplication(bundleID: bundleID, url: url)
+        return lightweightApplication(bundleID: bundleID, url: url)
     }
 
     func capableApplications(for type: FileTypeInfo) -> [ApplicationInfo] {
@@ -187,17 +186,6 @@ struct LaunchServicesClient: Sendable {
         return ApplicationInfo(bundleIdentifier: bundleID, name: name, url: url, supportedTypes: [])
     }
 
-    private func resolvedApplicationURL(bundleIdentifier: String,
-                                        contentType: FileTypeInfo) -> URL? {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier),
-           isUsableApplicationURL(url) {
-            return url
-        }
-        guard let type = UTType(contentType.contentTypeIdentifier) else { return nil }
-        return NSWorkspace.shared.urlsForApplications(toOpen: type).first { url in
-            isUsableApplicationURL(url) && Bundle(url: url)?.bundleIdentifier == bundleIdentifier
-        }
-    }
 }
 
 private extension Sequence {

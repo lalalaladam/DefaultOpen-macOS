@@ -25,6 +25,26 @@ struct AppScanner: Sendable {
         return Dictionary(grouping: types, by: \SupportedType.id).compactMap(\.value.first)
     }
 
+    func declaredFileTypes(from applications: [ApplicationInfo]) -> [FileTypeInfo] {
+        let types = applications.flatMap { application in
+            application.documentTypes
+                .filter { $0.source == .bundleDeclaration }
+                .flatMap { document in
+                    document.extensions.compactMap { extensionName -> FileTypeInfo? in
+                        guard let type = UTType(filenameExtension: extensionName) else { return nil }
+                        return FileTypeInfo(
+                            extensionName: extensionName,
+                            contentTypeIdentifier: type.identifier,
+                            displayName: document.name
+                        )
+                    }
+                }
+        }
+        return Dictionary(grouping: types, by: \FileTypeInfo.id)
+            .compactMap(\.value.first)
+            .sorted { $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending }
+    }
+
     func applicationsCapable(of fileType: FileTypeInfo) -> [ApplicationInfo] {
         let client = LaunchServicesClient()
         let inferredType = SupportedType(

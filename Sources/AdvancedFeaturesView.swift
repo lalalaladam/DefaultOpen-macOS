@@ -129,11 +129,15 @@ struct AdvancedFeaturesView: View {
                     .help(match.defaultApplication?.name ?? L10n.string("未设置"))
                 Group {
                     if let application = match.defaultApplication {
-                        CapabilitySourceBadge(
-                            evidence: store.capabilityEvidence(for: application,
-                                                               fileType: match.fileType),
-                            requestedIdentifier: match.fileType.contentTypeIdentifier
-                        )
+                        if let evidence = store.capabilityEvidenceIfAvailable(
+                            for: application,
+                            fileType: match.fileType
+                        ) {
+                            CapabilitySourceBadge(
+                                evidence: evidence,
+                                requestedIdentifier: match.fileType.contentTypeIdentifier
+                            )
+                        }
                     }
                 }
                 .frame(width: 52, alignment: .leading)
@@ -176,13 +180,12 @@ struct AdvancedFeaturesView: View {
         var fileTypes: [FileTypeInfo] = []
         if let preferred { fileTypes.append(preferred) }
         fileTypes += store.registeredFileTypes(forExtension: extensionName).filter { candidate in
-            guard let type = UTType(candidate.contentTypeIdentifier), !type.isDynamic else { return false }
             return !fileTypes.contains { $0.contentTypeIdentifier == candidate.contentTypeIdentifier }
         }
 
         store.refreshDefaults(for: fileTypes)
         matches = fileTypes.compactMap { fileType in
-            guard let type = UTType(fileType.contentTypeIdentifier), !type.isDynamic else { return nil }
+            guard let type = UTType(fileType.contentTypeIdentifier) else { return nil }
             let capableApplications = store.capableApplications(for: fileType)
             return FallbackTypeMatch(
                 fileType: fileType,
@@ -193,6 +196,7 @@ struct AdvancedFeaturesView: View {
                     && store.modificationRisk(for: fileType) != .protected
             )
         }
+        Task { await store.loadDefaultApplicationCapabilityMetadata() }
     }
 }
 
