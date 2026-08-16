@@ -310,6 +310,8 @@ private struct FileSpecificAssociationView: View {
                 Image(systemName: isTargeted ? "arrow.down.doc.fill" : "doc.badge.plus")
                     .font(.system(size: files.isEmpty ? 38 : 28, weight: .medium))
                     .foregroundStyle(.tint)
+                    .frame(width: files.isEmpty ? 44 : 34,
+                           height: files.isEmpty ? 44 : 34)
                 VStack(spacing: 3) {
                     Text(files.isEmpty
                          ? L10n.string("拖入一个或多个文件")
@@ -434,23 +436,63 @@ private struct FileSpecificAssociationView: View {
         VStack(alignment: .leading, spacing: 7) {
             Text(L10n.string("当前打开方式"))
                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                ForEach(Array(currentApplicationGroups.prefix(3))) { group in
-                    currentAppBadge(group)
-                }
-                if currentApplicationGroups.count > 3 {
-                    Button(L10n.format("fileAssociation.moreApps",
-                                       currentApplicationGroups.count - 3)) {
-                        showsAllCurrentApps = true
+            GeometryReader { proxy in
+                let visibleCount = visibleCurrentApplicationGroupCount(for: proxy.size.width)
+                HStack(spacing: 6) {
+                    ForEach(Array(currentApplicationGroups.prefix(visibleCount))) { group in
+                        currentAppBadge(group)
                     }
-                    .buttonStyle(.bordered).controlSize(.small)
-                    .popover(isPresented: $showsAllCurrentApps, arrowEdge: .bottom) {
-                        allCurrentAppsPopover
+                    if currentApplicationGroups.count > visibleCount {
+                        Button(L10n.format("fileAssociation.moreApps",
+                                           currentApplicationGroups.count - visibleCount)) {
+                            showsAllCurrentApps = true
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .popover(isPresented: $showsAllCurrentApps, arrowEdge: .bottom) {
+                            allCurrentAppsPopover
+                        }
                     }
+                    Spacer()
                 }
-                Spacer()
+            }
+            .frame(height: 26)
+        }
+    }
+
+    private func visibleCurrentApplicationGroupCount(for availableWidth: CGFloat) -> Int {
+        let groups = currentApplicationGroups
+        guard !groups.isEmpty else { return 0 }
+
+        for visibleCount in stride(from: groups.count, through: 1, by: -1) {
+            let badgesWidth = groups.prefix(visibleCount)
+                .map(currentAppBadgeWidth)
+                .reduce(0, +)
+            let hiddenCount = groups.count - visibleCount
+            let itemCount = visibleCount + (hiddenCount > 0 ? 1 : 0)
+            let spacingWidth = CGFloat(max(0, itemCount - 1)) * 6
+            let moreButtonWidth = hiddenCount > 0 ? currentAppMoreButtonWidth(hiddenCount) : 0
+            if badgesWidth + spacingWidth + moreButtonWidth <= availableWidth {
+                return visibleCount
             }
         }
+        return 1
+    }
+
+    private func currentAppBadgeWidth(_ group: CurrentApplicationGroup) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        let nameWidth = min(120, textWidth(group.name, font: font))
+        let countWidth = textWidth("\(group.count)", font: font)
+        return 18 + 10 + nameWidth + countWidth + 16
+    }
+
+    private func currentAppMoreButtonWidth(_ hiddenCount: Int) -> CGFloat {
+        let title = L10n.format("fileAssociation.moreApps", hiddenCount)
+        let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        return textWidth(title, font: font) + 24
+    }
+
+    private func textWidth(_ text: String, font: NSFont) -> CGFloat {
+        ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
 
     private func currentAppBadge(_ group: CurrentApplicationGroup) -> some View {
@@ -563,10 +605,13 @@ private struct FileSpecificAssociationView: View {
             Image(nsImage: NSWorkspace.shared.icon(forFile: file.path))
                 .resizable().frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 2) {
-                Text(file.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                Text(file.lastPathComponent)
+                    .lineLimit(1).truncationMode(.middle)
+                    .help(file.path)
                 Text(file.deletingLastPathComponent().path)
                     .font(.caption2).foregroundStyle(.tertiary)
                     .lineLimit(1).truncationMode(.middle)
+                    .help(file.path)
             }
             Spacer()
             HStack(spacing: 5) {
@@ -624,8 +669,12 @@ private struct FileSpecificAssociationView: View {
         let valid = urls.filter { url in
             (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == false
         }
+        let previousCount = files.count
         var seen = Set(files.map { $0.standardizedFileURL })
         files += valid.map(\.standardizedFileURL).filter { seen.insert($0).inserted }
+        if files.count > previousCount {
+            showsFileDetails = true
+        }
         statuses = [:]
         refreshCurrentApplications()
         reloadApplications()
