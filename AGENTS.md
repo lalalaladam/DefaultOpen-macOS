@@ -20,6 +20,14 @@
 - Do not discard or overwrite existing user changes.
 - Generated build products must remain excluded from Git.
 
+### Commit Messages
+
+- Write commit titles in English only.
+- Write commit descriptions bilingually.
+- In the description, write the English version first, followed by a Chinese translation with the same meaning.
+- Keep the English and Chinese descriptions semantically equivalent; do not add information in only one language.
+- Keep commit titles concise and imperative when appropriate.
+
 ## Official Releases
 
 - Before preparing or publishing an official release, read and follow:

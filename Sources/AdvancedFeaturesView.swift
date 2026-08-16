@@ -552,7 +552,7 @@ private struct FileSpecificAssociationView: View {
                 Text(L10n.string("状态"))
                     .frame(width: 105, alignment: .leading)
             }
-            Color.clear.frame(width: 14, height: 1)
+            Color.clear.frame(width: 22, height: 1)
         }
         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
         .padding(.horizontal, 2).padding(.vertical, 4)
@@ -584,6 +584,7 @@ private struct FileSpecificAssociationView: View {
             .buttonStyle(.plain).disabled(isApplying)
         }
         .padding(.vertical, 6)
+        .padding(.trailing, 8)
     }
 
     @ViewBuilder
