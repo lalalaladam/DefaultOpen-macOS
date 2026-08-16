@@ -25,6 +25,26 @@ func chooseApplicationURL() async -> URL? {
     }
 }
 
+@MainActor
+func chooseFileURLs() async -> [URL] {
+    let panel = NSOpenPanel()
+    panel.title = L10n.string("选择文件")
+    panel.prompt = L10n.string("选择")
+    panel.message = L10n.string("选择一个或多个要单独设置打开方式的文件。")
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.allowsMultipleSelection = true
+    panel.resolvesAliases = true
+    guard let parentWindow = NSApp.keyWindow ?? NSApp.mainWindow else {
+        return []
+    }
+    return await withCheckedContinuation { continuation in
+        panel.beginSheetModal(for: parentWindow) { response in
+            continuation.resume(returning: response == .OK ? panel.urls : [])
+        }
+    }
+}
+
 struct VisualEffectView: NSViewRepresentable {
     var material: NSVisualEffectView.Material = .underWindowBackground
     var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
