@@ -31,6 +31,46 @@ enum AssociationError: LocalizedError {
 }
 
 struct LaunchServicesClient: Sendable {
+    func defaultApplication(forFileAt url: URL) -> ApplicationInfo? {
+        guard let applicationURL = NSWorkspace.shared.urlForApplication(toOpen: url),
+              let bundleID = Bundle(url: applicationURL)?.bundleIdentifier,
+              isUsableApplicationURL(applicationURL) else { return nil }
+        return lightweightApplication(bundleID: bundleID, url: applicationURL)
+    }
+
+    func capableApplications(forFileAt url: URL) -> [ApplicationInfo] {
+        NSWorkspace.shared.urlsForApplications(toOpen: url)
+            .filter(isUsableApplicationURL)
+            .compactMap { applicationURL in
+                guard let bundleID = Bundle(url: applicationURL)?.bundleIdentifier else {
+                    return nil
+                }
+                return lightweightApplication(bundleID: bundleID, url: applicationURL)
+            }
+            .uniqued(by: \ApplicationInfo.bundleIdentifier)
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func applicationInfo(at url: URL) throws -> ApplicationInfo {
+        guard url.pathExtension.caseInsensitiveCompare("app") == .orderedSame,
+              isUsableApplicationURL(url) else {
+            throw AssociationError.invalidApplication(url)
+        }
+        guard let bundleID = Bundle(url: url)?.bundleIdentifier else {
+            throw AssociationError.missingBundleIdentifier(url)
+        }
+        return (try? AppScanner().applicationInfo(at: url))
+            ?? lightweightApplication(bundleID: bundleID, url: url)
+    }
+
+    func setDefaultAwaitingConsent(_ application: ApplicationInfo,
+                                   forFileAt url: URL) async throws {
+        try await NSWorkspace.shared.setDefaultApplication(
+            at: application.url,
+            toOpenFileAt: url
+        )
+    }
+
     func fileTypes(for rawExtension: String) throws -> [FileTypeInfo] {
         let ext = try normalizedExtension(rawExtension)
 
