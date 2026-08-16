@@ -469,16 +469,45 @@ final class AboutWindowController: NSWindowController {
         content.addSubview(separator)
         top -= 19
 
-        let credits = label(
-            languageSettings.string("about.projectInformation"),
+        let projectTitle = label(languageSettings.string("about.projectTitle"), size: 12)
+        projectTitle.alignment = .center
+        projectTitle.isSelectable = false
+        place(projectTitle, in: content, top: &top, height: 16, gap: 8)
+
+        let repositoryButton = NSButton(
+            title: "github.com/lalalaladam/DefaultOpen-macOS",
+            target: self,
+            action: #selector(openProjectRepository(_:))
+        )
+        repositoryButton.isBordered = false
+        repositoryButton.font = .systemFont(ofSize: 12)
+        repositoryButton.contentTintColor = .linkColor
+        repositoryButton.alignment = .center
+        repositoryButton.focusRingType = .none
+        repositoryButton.frame = NSRect(x: 32, y: top - 18, width: size.width - 64, height: 18)
+        content.addSubview(repositoryButton)
+        top -= 26
+
+        let technology = label(
+            languageSettings.string("about.technology"),
             size: 12,
             color: .secondaryLabelColor
         )
-        credits.alignment = .center
-        credits.maximumNumberOfLines = 0
-        credits.lineBreakMode = .byWordWrapping
-        credits.preferredMaxLayoutWidth = size.width - 64
-        place(credits, in: content, top: &top, height: 128, width: size.width - 64)
+        technology.alignment = .center
+        technology.isSelectable = false
+        place(technology, in: content, top: &top, height: 18, gap: 8)
+
+        let projectDescription = label(
+            languageSettings.string("about.description"),
+            size: 12,
+            color: .secondaryLabelColor
+        )
+        projectDescription.alignment = .center
+        projectDescription.isSelectable = false
+        projectDescription.maximumNumberOfLines = 0
+        projectDescription.lineBreakMode = .byWordWrapping
+        projectDescription.preferredMaxLayoutWidth = size.width - 64
+        place(projectDescription, in: content, top: &top, height: 36, width: size.width - 64)
 
         window.contentView = content
         window.setContentSize(size)
@@ -492,6 +521,11 @@ final class AboutWindowController: NSWindowController {
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+    }
+
+    @objc private func openProjectRepository(_ sender: Any?) {
+        guard let url = URL(string: "https://github.com/lalalaladam/DefaultOpen-macOS") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func label(_ text: String, size: CGFloat = 13,

@@ -775,6 +775,9 @@ private struct DefaultAppPickerSheet: View {
                                          targets: assignment.targets)
                     }
                     if !currentStatus.missingTargets.isEmpty {
+                        let missingTargetsText = currentStatus.missingTargets.joined(
+                            separator: L10n.string("list.separator")
+                        )
                         HStack(spacing: 7) {
                             Image(systemName: "questionmark.circle")
                                 .foregroundStyle(.secondary).frame(width: 18)
@@ -782,11 +785,11 @@ private struct DefaultAppPickerSheet: View {
                                 .font(.caption)
                             Image(systemName: "arrow.right")
                                 .font(.caption2).foregroundStyle(.tertiary)
-                            Text(currentStatus.missingTargets.joined(
-                                separator: L10n.string("list.separator")))
+                            Text(missingTargetsText)
                                 .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                             Spacer()
                         }
+                        .help(missingTargetsText)
                     }
                 }
                 if category.hasOptionalExtensions {
@@ -812,6 +815,9 @@ private struct DefaultAppPickerSheet: View {
                                              targets: assignment.targets)
                         }
                         if !optionalStatus.missingTargets.isEmpty {
+                            let missingTargetsText = optionalStatus.missingTargets.joined(
+                                separator: L10n.string("list.separator")
+                            )
                             HStack(spacing: 7) {
                                 Image(systemName: "questionmark.circle")
                                     .foregroundStyle(.secondary).frame(width: 18)
@@ -819,11 +825,11 @@ private struct DefaultAppPickerSheet: View {
                                     .font(.caption)
                                 Image(systemName: "arrow.right")
                                     .font(.caption2).foregroundStyle(.tertiary)
-                                Text(optionalStatus.missingTargets.joined(
-                                    separator: L10n.string("list.separator")))
+                                Text(missingTargetsText)
                                     .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                                 Spacer()
                             }
+                            .help(missingTargetsText)
                         }
                     }
                 }
