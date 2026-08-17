@@ -273,11 +273,14 @@ private struct ApplicationDetailView: View {
     private var extensionTable: some View {
         GeometryReader { proxy in
             let sourceWidth: CGFloat = 72
-            let actionWidth: CGFloat = 80
-            let informationWidth = max(352, proxy.size.width - sourceWidth - actionWidth - 76)
+            let isEnglish = LanguageSettings.shared.language == .english
+            let englishActionExpansion: CGFloat = isEnglish ? 24 : 0
+            let actionWidth: CGFloat = 80 + englishActionExpansion
+            let informationWidth = max(352, proxy.size.width - sourceWidth - 80 - 76)
             let extensionWidth = max(112, informationWidth * 0.20)
-            let typeWidth = max(90, informationWidth * 0.45)
-            let defaultAppWidth = max(150, informationWidth - extensionWidth - typeWidth)
+            let baseTypeWidth = max(90, informationWidth * 0.45)
+            let typeWidth = max(90, baseTypeWidth - englishActionExpansion)
+            let defaultAppWidth = max(150, informationWidth - extensionWidth - baseTypeWidth)
 
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
@@ -357,7 +360,11 @@ private struct ApplicationDetailView: View {
             }
             .frame(width: defaultAppWidth, alignment: .leading)
 
-            Button(L10n.string("设为默认")) { makeDefault(row) }
+            Button { makeDefault(row) } label: {
+                Text(L10n.string("设为默认"))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
                 .buttonStyle(.borderless)
                 .disabled(row.isApplicationDefault || store.modificationRisk(for: row.fileType) == .protected)
                 .frame(width: actionWidth)

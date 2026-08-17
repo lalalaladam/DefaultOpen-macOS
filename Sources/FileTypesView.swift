@@ -153,6 +153,20 @@ struct FileTypesView: View {
                                     .lineLimit(1).frame(width: extensionWidth, alignment: .leading)
                                     .contentShape(Rectangle())
                                     .help(row.type.dottedExtension)
+                                    .contextMenu {
+                                        Button(L10n.string("复制扩展名")) {
+                                            copyToPasteboard(row.type.dottedExtension)
+                                        }
+                                        Button(L10n.string("复制 UTType")) {
+                                            copyToPasteboard(row.type.contentTypeIdentifier)
+                                        }
+                                        if store.isCustomFileType(row.type) {
+                                            Divider()
+                                            Button(L10n.string("删除自定义扩展名…"), role: .destructive) {
+                                                typePendingDeletion = row.type
+                                            }
+                                        }
+                                    }
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
                                         Text(row.type.displayName).lineLimit(1).truncationMode(.tail)
@@ -183,6 +197,20 @@ struct FileTypesView: View {
                                 .frame(width: typeWidth, alignment: .leading)
                                 .contentShape(Rectangle())
                                 .help(fileTypeHelp(for: row.type, risk: modificationRisk))
+                                .contextMenu {
+                                    Button(L10n.string("复制扩展名")) {
+                                        copyToPasteboard(row.type.dottedExtension)
+                                    }
+                                    Button(L10n.string("复制 UTType")) {
+                                        copyToPasteboard(row.type.contentTypeIdentifier)
+                                    }
+                                    if store.isCustomFileType(row.type) {
+                                        Divider()
+                                        Button(L10n.string("删除自定义扩展名…"), role: .destructive) {
+                                            typePendingDeletion = row.type
+                                        }
+                                    }
+                                }
                                 DefaultAppLabel(application: row.defaultApplication,
                                                 fileType: row.type,
                                                 showsCapabilitySource: true)
@@ -205,20 +233,6 @@ struct FileTypesView: View {
                             .padding(.horizontal, 12).frame(height: 56)
                             .background(row.id == highlightedTypeID ? Color.accentColor.opacity(0.14) : .clear)
                             .id(row.id)
-                            .contextMenu {
-                                Button(L10n.string("复制扩展名")) {
-                                    copyToPasteboard(row.type.dottedExtension)
-                                }
-                                Button(L10n.string("复制 UTType")) {
-                                    copyToPasteboard(row.type.contentTypeIdentifier)
-                                }
-                                if store.isCustomFileType(row.type) {
-                                    Divider()
-                                    Button(L10n.string("删除自定义扩展名…"), role: .destructive) {
-                                        typePendingDeletion = row.type
-                                    }
-                                }
-                            }
                             Divider().padding(.leading, 12)
                             }
                         }
