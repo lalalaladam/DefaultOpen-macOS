@@ -272,7 +272,7 @@ private struct ApplicationDetailView: View {
 
     private var extensionTable: some View {
         GeometryReader { proxy in
-            let sourceWidth: CGFloat = proxy.size.width < 650 ? 56 : 64
+            let sourceWidth: CGFloat = 72
             let actionWidth: CGFloat = 80
             let informationWidth = max(352, proxy.size.width - sourceWidth - actionWidth - 76)
             let extensionWidth = max(112, informationWidth * 0.20)

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct FileTypesView: View {
@@ -205,7 +206,14 @@ struct FileTypesView: View {
                             .background(row.id == highlightedTypeID ? Color.accentColor.opacity(0.14) : .clear)
                             .id(row.id)
                             .contextMenu {
+                                Button(L10n.string("复制扩展名")) {
+                                    copyToPasteboard(row.type.dottedExtension)
+                                }
+                                Button(L10n.string("复制 UTType")) {
+                                    copyToPasteboard(row.type.contentTypeIdentifier)
+                                }
                                 if store.isCustomFileType(row.type) {
+                                    Divider()
                                     Button(L10n.string("删除自定义扩展名…"), role: .destructive) {
                                         typePendingDeletion = row.type
                                     }
@@ -335,6 +343,11 @@ struct FileTypesView: View {
             lines.append(L10n.string("这是基础 UTType，仅供查看，不能修改默认 App。"))
         }
         return lines.joined(separator: "\n")
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 
 }
@@ -482,7 +495,7 @@ private struct DefaultAppLabel: View {
                         }
                     }
                 }
-                .frame(width: 52, alignment: .leading)
+                .frame(width: 72, alignment: .leading)
             }
         }
         .contentShape(Rectangle())

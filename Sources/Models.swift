@@ -479,6 +479,8 @@ struct CapabilitySourceBadge: View {
     var body: some View {
         Text(evidence.source.label)
             .font(.caption2.weight(.semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(foregroundColor)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
