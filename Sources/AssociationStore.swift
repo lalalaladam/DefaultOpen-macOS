@@ -60,7 +60,7 @@ final class AssociationStore: ObservableObject {
     private var defaultAppCandidatesCache: [String: CachedDefaultAppCandidates] = [:]
     private var loadingDefaultAppCandidates: [String: LoadingDefaultAppCandidates] = [:]
     private var queriedApplicationExtensions = Set<String>()
-    private var queriedDefaultContentTypes = Set<String>()
+    private var loadingDefaultContentTypes = Set<String>()
     private var registeredFileTypesByExtension: [String: [FileTypeInfo]] = [:]
     private var fullyLoadedDeclaredFileTypes: [FileTypeInfo] = []
     private var applicationBundleSnapshot: Set<String>?
@@ -179,7 +179,7 @@ final class AssociationStore: ObservableObject {
     private func performApplicationScan() async {
         queriedApplicationExtensions.removeAll()
         loadingApplicationExtensions.removeAll()
-        queriedDefaultContentTypes.removeAll()
+        loadingDefaultContentTypes.removeAll()
         registeredFileTypesByExtension.removeAll()
         let scanner = self.scanner
         let launchServices = self.launchServices
@@ -351,16 +351,20 @@ final class AssociationStore: ObservableObject {
               extensionName.count <= 32,
               !extensionName.contains(where: { $0.isWhitespace || $0 == "." }),
               let fileType = try? launchServices.fileType(for: extensionName),
-              defaultsByContentType[fileType.contentTypeIdentifier] == nil,
-              !queriedDefaultContentTypes.contains(fileType.contentTypeIdentifier) else { return }
+              !loadingDefaultContentTypes.contains(fileType.contentTypeIdentifier) else { return }
 
-        queriedDefaultContentTypes.insert(fileType.contentTypeIdentifier)
+        loadingDefaultContentTypes.insert(fileType.contentTypeIdentifier)
+        defer { loadingDefaultContentTypes.remove(fileType.contentTypeIdentifier) }
         let launchServices = self.launchServices
         let defaultApplication = await Task.detached(priority: .userInitiated) {
             launchServices.defaultApplication(for: fileType)
         }.value
+        guard !Task.isCancelled else { return }
         if let defaultApplication {
             defaultsByContentType[fileType.contentTypeIdentifier] = defaultApplication
+            saveExternallyAssociatedExtensionIfNeeded(fileType)
+        } else {
+            defaultsByContentType.removeValue(forKey: fileType.contentTypeIdentifier)
         }
     }
 
@@ -483,11 +487,7 @@ final class AssociationStore: ObservableObject {
     }
 
     func validatedApplication(at url: URL, for type: FileTypeInfo) throws -> ApplicationInfo {
-        let application = try scanner.applicationInfo(at: url)
-        guard applicationSupports(application, fileType: type) else {
-            throw AssociationError.incompatibleApplication(application.name, [type.dottedExtension])
-        }
-        return application
+        try scanner.applicationInfo(at: url)
     }
 
     func capabilityEvidence(for application: ApplicationInfo,
@@ -911,7 +911,8 @@ final class AssociationStore: ObservableObject {
         }
     }
 
-    func setDefault(_ application: ApplicationInfo, for types: [FileTypeInfo]) async -> Bool {
+    func setDefault(_ application: ApplicationInfo, for types: [FileTypeInfo],
+                    allowsExplicitUnsupportedSelection: Bool = false) async -> Bool {
         do {
             let uniqueTypes = Dictionary(grouping: types, by: \FileTypeInfo.contentTypeIdentifier)
                 .compactMap(\.value.first)
@@ -919,15 +920,17 @@ final class AssociationStore: ObservableObject {
                 errorMessage = L10n.string("基础 UTType 仅供查看，不能修改默认 App。")
                 return false
             }
-            let unsupportedTypes = uniqueTypes.filter {
-                !applicationSupports(application, fileType: $0)
-            }
-            guard unsupportedTypes.isEmpty else {
-                errorMessage = AssociationError.incompatibleApplication(
-                    application.name,
-                    unsupportedTypes.map(\.dottedExtension)
-                ).localizedDescription
-                return false
+            if !allowsExplicitUnsupportedSelection {
+                let unsupportedTypes = uniqueTypes.filter {
+                    !applicationSupports(application, fileType: $0)
+                }
+                guard unsupportedTypes.isEmpty else {
+                    errorMessage = AssociationError.incompatibleApplication(
+                        application.name,
+                        unsupportedTypes.map(\.dottedExtension)
+                    ).localizedDescription
+                    return false
+                }
             }
             let typesToChange = uniqueTypes.filter {
                 launchServices.defaultApplication(for: $0)?.bundleIdentifier != application.bundleIdentifier
@@ -982,9 +985,14 @@ final class AssociationStore: ObservableObject {
             })
         }.value
         optimisticDefaultAppStatuses.removeAll()
-        defaultsByContentType = Dictionary(uniqueKeysWithValues: refreshed.compactMap {
-            identifier, application in application.map { (identifier, $0) }
-        })
+        // Launch Services may briefly return nil while rebuilding its registration database.
+        // Merge confirmed handlers instead of replacing the entire cache so visible rows do not
+        // flash as unset during that transient window.
+        for (identifier, application) in refreshed {
+            if let application {
+                defaultsByContentType[identifier] = application
+            }
+        }
         await loadDefaultApplicationCapabilityMetadata()
         defaultAppCandidatesCache.removeAll()
         loadingDefaultAppCandidates.values.forEach { $0.task.cancel() }
@@ -1057,6 +1065,26 @@ final class AssociationStore: ObservableObject {
 
     private func persistCustomExtensions(_ extensions: [String]) {
         UserDefaults.standard.set(extensions, forKey: savedKey)
+    }
+
+    private func saveExternallyAssociatedExtensionIfNeeded(_ type: FileTypeInfo) {
+        let extensionName = type.extensionName.lowercased()
+        guard !starterExtensions.contains(extensionName),
+              !customExtensionNames.contains(extensionName),
+              !allFileTypes.contains(where: {
+                  $0.extensionName.caseInsensitiveCompare(extensionName) == .orderedSame
+              }) else { return }
+
+        persistCustomExtensions(customExtensionNames + [extensionName])
+        if !fileTypes.contains(where: {
+            $0.extensionName.caseInsensitiveCompare(extensionName) == .orderedSame
+        }) {
+            fileTypes.append(type)
+            fileTypes.sort {
+                $0.extensionName.localizedStandardCompare($1.extensionName) == .orderedAscending
+            }
+        }
+        mergeIntoFileTypeCatalog([type])
     }
 
     private static func loadCustomDefaultAppCategories() -> [DefaultAppCategory] {

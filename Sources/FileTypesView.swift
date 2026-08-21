@@ -531,6 +531,7 @@ struct ApplicationPickerSheet: View {
     @State private var isApplying = false
     @State private var validationMessage: String?
     @State private var confirmsBroadTypeChange = false
+    @State private var explicitlySelectedApplicationID: ApplicationInfo.ID?
 
     private var selectedApplication: ApplicationInfo? {
         applications.first { $0.id == selectedApplicationID }
@@ -726,6 +727,7 @@ struct ApplicationPickerSheet: View {
             applications.append(application)
             applications.sort(by: applicationSort)
             selectedApplicationID = application.id
+            explicitlySelectedApplicationID = application.id
         } catch {
             validationMessage = error.localizedDescription
         }
@@ -736,7 +738,11 @@ struct ApplicationPickerSheet: View {
         let shouldSaveAsCustomType = !store.isKnownFileType(type)
         isApplying = true
         Task { @MainActor in
-            if await store.setDefault(application, for: [type]) {
+            if await store.setDefault(
+                application,
+                for: [type],
+                allowsExplicitUnsupportedSelection: explicitlySelectedApplicationID == application.id
+            ) {
                 if shouldSaveAsCustomType {
                     _ = store.addExtension(type.extensionName)
                 }
